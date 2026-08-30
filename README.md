@@ -79,18 +79,18 @@ bash build.sh</code></pre>
 
 ## 📚 Документация
 
-Подробные руководства и справочная информация находятся в папке [`docs/`](docs/):
+Подробные руководства и справочная информация находятся в папке [`containerd-ui/docs/`](containerd-ui/docs/):
 
-- [📄 README](docs/README.md) — обзор документации и навигация по ней.
-- [🚀 Быстрый старт](docs/quickstart.md) — установка и первый запуск.
-- [⚙️ Установка окружения](docs/installation.md) — настройка WSL, containerd и BuildKit.
-- [🛠️ Конфигурация](docs/configuration.md) — параметры и настройки приложения.
-- [🌐 Деплой на домен](docs/deployment.md) — инструкции по Traefik и Cloudflare Tunnel.
-- [🩺 Диагностика](docs/diagnostics.md) — проверка работоспособности и поиск ошибок.
-- [🧩 Образы и обновления](docs/images-and-updates.md) — работа с образами и процесс обновления.
-- [📋 Требования к проекту](docs/project-requirements.md) — необходимые зависимости и структура.
-- [🛟 Решение проблем](docs/troubleshooting.md) — FAQ и частые ошибки.
-- [🧠 Архитектура и концепции](docs/concepts.md) — внутреннее устройство и принципы работы.
+- [📄 README](containerd-ui/docs/README.md) — обзор документации и навигация по ней.
+- [🚀 Быстрый старт](containerd-ui/docs/quickstart.md) — установка и первый запуск.
+- [⚙️ Установка окружения](containerd-ui/docs/installation.md) — настройка WSL, containerd и BuildKit.
+- [🛠️ Конфигурация](containerd-ui/docs/configuration.md) — параметры и настройки приложения.
+- [🌐 Деплой на домен](containerd-ui/docs/deployment.md) — инструкции по Traefik и Cloudflare Tunnel.
+- [🩺 Диагностика](containerd-ui/docs/diagnostics.md) — проверка работоспособности и поиск ошибок.
+- [🧩 Образы и обновления](containerd-ui/docs/images-and-updates.md) — работа с образами и процесс обновления.
+- [📋 Требования к проекту](containerd-ui/docs/project-requirements.md) — необходимые зависимости и структура.
+- [🛟 Решение проблем](containerd-ui/docs/troubleshooting.md) — FAQ и частые ошибки.
+- [🧠 Архитектура и концепции](containerd-ui/docs/concepts.md) — внутреннее устройство и принципы работы.
 
 ---
 
