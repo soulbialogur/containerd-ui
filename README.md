@@ -49,24 +49,22 @@
 
 ---
 
-🚀 Быстрый старт
-Установите WSL и дистрибутив
+<h2>🚀 Быстрый старт</h2>
 
-powershell
-wsl --install Ubuntu-24.04
-Установите контейнерный стек внутри WSL
+<p><strong>Установите WSL и дистрибутив</strong></p>
+<pre><code>wsl --install Ubuntu-24.04</code></pre>
 
-bash
-sudo apt update && sudo apt install -y containerd nerdctl buildkit
-sudo systemctl enable --now containerd buildkit
-Соберите приложение
+<p><strong>Установите контейнерный стек внутри WSL</strong></p>
+<pre><code>sudo apt update &amp;&amp; sudo apt install -y containerd nerdctl buildkit
+sudo systemctl enable --now containerd buildkit</code></pre>
 
-powershell
-cd containerd-ui
-bash build.sh
-Запустите containerd-ui.exe и укажите путь к корню проекта (где лежит compose.yaml).
+<p><strong>Соберите приложение</strong></p>
+<pre><code>cd containerd-ui
+bash build.sh</code></pre>
 
-Проверьте статус во вкладке «Статус» – все иконки должны быть зелёными, затем можно собирать и деплоить проект.
+<p>Запустите containerd-ui.exe и укажите путь к корню проекта (где лежит compose.yaml).</p>
+
+<p>Проверьте статус во вкладке «Статус» – все иконки должны быть зелёными, затем можно собирать и деплоить проект.</p>
 
 ## 📚 Документация
 
