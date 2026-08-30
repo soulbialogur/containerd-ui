@@ -1,4 +1,4 @@
-#Containerd UI
+Containerd UI
 Containerd UI — это нативное Windows-приложение (Go + Fyne) для управления контейнерами через WSL2, containerd, nerdctl и BuildKit. Оно предоставляет удобный графический интерфейс для сборки, мониторинга и деплоя проектов, работая по двухслойной архитектуре: основной канал — gRPC API containerd, резервный — WSL + nerdctl.
 
 📦 Возможности
