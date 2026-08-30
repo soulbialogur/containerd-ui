@@ -1,8 +1,14 @@
-# Containerd UI
+<div align="center">
 
-**Containerd UI** — это нативное Windows-приложение (Go + Fyne), которое предоставляет графический интерфейс для управления контейнерами через WSL2, containerd, nerdctl и BuildKit. Оно построено на двухслойной архитектуре: основной канал — gRPC API containerd, резервный — WSL + nerdctl.
+# 🚀 Containerd UI
+
+**Containerd UI** — это нативное Windows-приложение (Go + Fyne), которое предоставляет графический интерфейс для управления контейнерами через WSL2, containerd, nerdctl и BuildKit.
+
+Оно построено на двухслойной архитектуре: основной канал — gRPC API containerd, резервный — WSL + nerdctl.
 
 Инструмент идеально подходит для локальной разработки, сборки и деплоя проектов в среде Windows без необходимости переключения между терминалами.
+
+</div>
 
 ---
 
@@ -49,22 +55,27 @@
 
 ---
 
-<h2>🚀 Быстрый старт</h2>
+## 🚀 Быстрый старт
 
-<p><strong>Установите WSL и дистрибутив</strong></p>
+**Установите WSL и дистрибутив**
+
 <pre><code>wsl --install Ubuntu-24.04</code></pre>
 
-<p><strong>Установите контейнерный стек внутри WSL</strong></p>
+**Установите контейнерный стек внутри WSL**
+
 <pre><code>sudo apt update &amp;&amp; sudo apt install -y containerd nerdctl buildkit
 sudo systemctl enable --now containerd buildkit</code></pre>
 
-<p><strong>Соберите приложение</strong></p>
+**Соберите приложение**
+
 <pre><code>cd containerd-ui
 bash build.sh</code></pre>
 
-<p>Запустите containerd-ui.exe и укажите путь к корню проекта (где лежит compose.yaml).</p>
+Запустите `containerd-ui.exe` и укажите путь к корню проекта (где лежит `compose.yaml`).
 
-<p>Проверьте статус во вкладке «Статус» – все иконки должны быть зелёными, затем можно собирать и деплоить проект.</p>
+Проверьте статус во вкладке «Статус» – все иконки должны быть зелёными, затем можно собирать и деплоить проект.
+
+---
 
 ## 📚 Документация
 
@@ -76,6 +87,8 @@ bash build.sh</code></pre>
 - [Деплой на домен](docs/deployment.md)
 - [Решение проблем](docs/troubleshooting.md)
 - [Архитектура и концепции](docs/concepts.md)
+
+---
 
 ## 📄 Лицензия
 
@@ -102,7 +115,11 @@ bash build.sh</code></pre>
 
 ---
 
-### 🧡 О проекте
+## 🧡 О проекте
+
+<div align="center">
 
 Сделано с ❤️ для разработчиков, которые работают с контейнерами в среде Windows.  
 Ваш фидбек и поддержка помогают проекту становиться лучше!
+
+</div>
