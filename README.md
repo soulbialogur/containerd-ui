@@ -1,2 +1,61 @@
-# containerd-ui
-Containerd UI is a native Windows app (Go/Fyne) for managing containers via WSL2. It offers 11 tabs for containers, images, and monitoring. Key features include deployment (Traefik, Cloudflare), system cleanup, and resource optimization. Built with a dual-layer architecture (gRPC + nerdctl fallback) and a modern dark theme.
+#Containerd UI
+Containerd UI — это нативное Windows-приложение (Go + Fyne) для управления контейнерами через WSL2, containerd, nerdctl и BuildKit. Оно предоставляет удобный графический интерфейс для сборки, мониторинга и деплоя проектов, работая по двухслойной архитектуре: основной канал — gRPC API containerd, резервный — WSL + nerdctl.
+
+📦 Возможности
+Управление контейнерами – запуск, остановка, удаление, массовые операции, обновление образов без потери данных.
+
+Сборка проекта – через nerdctl compose с поддержкой BuildKit, прогресс-баром и кооперативной отменой.
+Мониторинг ресурсов – CPU, RAM, диск, сетевой I/O и статистика по контейнерам в реальном времени.
+Сети и тома – просмотр, создание и удаление сетей/томов, защита системных.
+Очистка системы – 6 видов очистки: кэш, dangling-образы, неиспользуемые тома/сети, образы без тегов, кэш BuildKit, полная уборка.
+Деплой на домен – выбор Traefik + Let's Encrypt или Cloudflare Tunnel с преддеплойной диагностикой (DNS, порты 80/443, инструменты).
+Умное кэширование – централизованный CacheManager с инвалидацией по событиям и сбором метрик (hit rate).
+Экономия ресурсов – режим economy_mode отключает фоновые обновления для неактивных вкладок.
+Статус окружения – проверка WSL, containerd, BuildKit, nerdctl, cloudflared.
+
+⚙️ Требования
+Windows 10/11 с WSL2
+
+Ubuntu 24.04 (внутри WSL)
+
+Установленные в WSL: containerd, nerdctl, buildkitd
+
+(Опционально) cloudflared для Cloudflare Tunnel
+
+🚀 Быстрый старт
+Установите WSL и дистрибутив
+
+powershell
+wsl --install Ubuntu-24.04
+Установите контейнерный стек внутри WSL
+
+bash
+sudo apt update && sudo apt install -y containerd nerdctl buildkit
+sudo systemctl enable --now containerd buildkit
+Соберите приложение
+
+powershell
+cd containerd-ui
+bash build.sh
+Запустите containerd-ui.exe и укажите путь к корню проекта (где лежит compose.yaml).
+
+Проверьте статус во вкладке «Статус» – все иконки должны быть зелёными, затем можно собирать и деплоить проект.
+
+📚 Документация
+Подробные руководства находятся в папке docs/:
+
+Быстрый старт
+Установка окружения
+Конфигурация
+Деплой на домен
+Решение проблем
+Архитектура и концепции
+
+📄 Лицензия
+Проект распространяется на условиях комбинированной лицензии – подробности в файле LICENSE.
+При коммерческом использовании или распространении сборок обязательно соблюдение условий лицензии и указание авторства.
+
+✉️ Контакты
+По вопросам, предложениям и сообщениям о безопасности пишите на soulbialogur@gmail.com (security-issues отправляйте туда же, не создавая публичные issue).
+
+Сделано с ❤️ для разработчиков, работающих с контейнерами в Windows.
