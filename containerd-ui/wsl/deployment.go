@@ -512,7 +512,7 @@ func CheckDeploymentPrerequisites(ctx context.Context) error {
 			msg += "\n📦 Установите через:\n"
 			msg += "  sudo apt update && sudo apt install -y nerdctl containerd build-essential\n"
 		}
-		return fmt.Errorf(msg)
+		return fmt.Errorf("%s", msg)
 	}
 
 	return nil
