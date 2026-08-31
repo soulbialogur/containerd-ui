@@ -1,0 +1,36 @@
+name: Build Windows Release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Build Windows executable
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          go build -ldflags "-s -w -H windowsgui" -o dist/containerd-ui.exe .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: containerd-ui-windows-amd64
+          path: dist/containerd-ui.exe
+          if-no-files-found: error
