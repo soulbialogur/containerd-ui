@@ -1,5 +1,7 @@
 <div align="center">
 
+![Build Status](https://github.com/soulbialogur/containerd-ui/actions/workflows/go.yml/badge.svg)
+
 # 🚀 Containerd UI
 
 **Containerd UI** — это нативное Windows-приложение (Go + Fyne), которое предоставляет графический интерфейс для управления контейнерами через WSL2, containerd, nerdctl и BuildKit.
@@ -97,7 +99,7 @@ bash build.sh</code></pre>
 ## 📄 Лицензия
 
 Проект распространяется на условиях **комбинированной лицензии**.  
-Полный текст условий доступен в файле [`LICENSE`](./LICENSE) в корне репозитория.
+Полный текст условий доступен в файле [`LICENSE`](containerd-ui/LICENSE) в корне репозитория.
 
 > ⚠️ **Важно:** При **коммерческом использовании** или **распространении сборок** проекта необходимо:
 > - строго соблюдать все условия лицензии;
