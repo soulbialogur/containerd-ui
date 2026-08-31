@@ -19,26 +19,30 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.5'  # или '1.26', если хотите использовать вашу версию
           cache: true
+          cache-dependency-path: containerd-ui/go.sum  # указываем, где искать go.sum для кеша
 
       - name: Download Go dependencies
+        working-directory: containerd-ui
         run: go mod download
 
       - name: Run tests
+        working-directory: containerd-ui
         run: go test -v -race ./...
 
       - name: Build Windows executable
+        working-directory: containerd-ui
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           go build -ldflags "-s -w -H windowsgui" -o dist/containerd-ui.exe .
 
       - name: Verify artifact
-        run: Test-Path dist/containerd-ui.exe
+        run: Test-Path containerd-ui/dist/containerd-ui.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: containerd-ui-windows-amd64
-          path: dist/containerd-ui.exe
+          path: containerd-ui/dist/containerd-ui.exe
           if-no-files-found: error
