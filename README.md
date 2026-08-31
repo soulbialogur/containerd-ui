@@ -1,6 +1,6 @@
 <div align="center">
 
-![Build Status](https://github.com/soulbialogur/containerd-ui/actions/workflows/go.yml/badge.svg)
+![Build Status](https://github.com/soulbialogur/containerd-ui/actions/workflows/main.yml/badge.svg)
 
 # 🚀 Containerd UI
 
