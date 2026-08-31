@@ -1,3 +1,175 @@
-git add .
-git commit -m "ci: enable GitHub Actions"
-git push origin main
+name: Build Windows Release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+
+env:
+  GOOS: windows
+  GOARCH: amd64
+  CGO_ENABLED: 1
+
+jobs:
+  # ─── Статический анализ ───────────────────────────────────────────────
+  quality:
+    name: Code Quality
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys:
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          if (-not (git diff --quiet go.mod go.sum)) {
+            Write-Error "go.mod/go.sum are not tidy. Run 'go mod tidy' locally."
+            exit 1
+          }
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+  # ─── Сборка ───────────────────────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: windows-latest
+    needs: quality
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-amd64
+            goarch: amd64
+            artifact: containerd-ui-windows-amd64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys:
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Create dist directory
+        run: New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+      - name: Build Windows executable
+        run: |
+          $version = 'dev'
+          if ($env:GITHUB_REF -match '^refs/tags/v') {
+            $version = $env:GITHUB_REF.Substring(11)
+          }
+          $buildTime = Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'
+          $ldflags = '-s -w -H windowsgui -X main.version=$version -X main.buildTime=$buildTime'
+          go build -ldflags $ldflags -o "dist/${{ matrix.artifact }}.exe" .
+
+      - name: Verify artifact
+        run: |
+          $file = "dist/${{ matrix.artifact }}.exe"
+          if (-not (Test-Path $file)) {
+            throw "Artifact $file not found"
+          }
+          $size = (Get-Item $file).Length
+          Write-Host "✅ Build successful: $($size / 1MB) MB"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  # ─── GitHub Release (только по тегу) ──────────────────────────────────
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          PREV_TAG=$(git tag --sort=-version:refname | grep -A 1 "$TAG" | tail -1 || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --oneline --no-decorate "$PREV_TAG..$TAG" 2>/dev/null || echo "No previous tag found")
+          else
+            CHANGELOG=$(git log --oneline --no-decorate -20 || echo "Initial release")
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.exe
+          draft: false
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+          generate_release_notes: true
+          body: |
+            ## Changelog
+            
+            ${{ steps.changelog.outputs.changelog }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
