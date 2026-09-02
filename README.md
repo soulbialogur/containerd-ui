@@ -4,135 +4,135 @@
 
 # 🚀 Containerd UI
 
-**Containerd UI** — это нативное Windows-приложение (Go + Fyne), которое предоставляет графический интерфейс для управления контейнерами через WSL2, containerd, nerdctl и BuildKit.
+**Containerd UI** is a native Windows application (Go + Fyne) that provides a graphical interface for managing containers via WSL2, containerd, nerdctl and BuildKit.
 
-Оно построено на двухслойной архитектуре: основной канал — gRPC API containerd, резервный — WSL + nerdctl.
+It is built on a two‑layer architecture: the primary channel is the containerd gRPC API, with a fallback to WSL + nerdctl.
 
-Инструмент идеально подходит для локальной разработки, сборки и деплоя проектов в среде Windows без необходимости переключения между терминалами.
+The tool is ideal for local development, building, and deploying projects in a Windows environment without having to switch between terminals.
 
 </div>
 
 ---
 
-## 🚀 Возможности
+## 🚀 Features
 
-- **Управление контейнерами**  
-  Запуск, остановка, удаление, массовые операции, а также обновление образов без потери данных.
+- **Container management**  
+  Start, stop, remove, perform batch operations, and update images without data loss.
 
-- **Сборка проекта**  
-  Поддержка `nerdctl compose` с BuildKit, визуальный прогресс-бар и возможность кооперативной отмены сборки.
+- **Project building**  
+  Support for `nerdctl compose` with BuildKit, a visual progress bar, and cooperative build cancellation.
 
-- **Мониторинг ресурсов в реальном времени**  
-  Отображение CPU, RAM, дисковых операций, сетевого I/O и статистики по каждому контейнеру.
+- **Real‑time resource monitoring**  
+  Display CPU, RAM, disk I/O, network I/O, and per‑container statistics.
 
-- **Управление сетями и томами**  
-  Просмотр, создание и удаление сетей и томов с защитой системных ресурсов от случайного изменения.
+- **Network and volume management**  
+  View, create, and delete networks and volumes with protection against accidental changes to system resources.
 
-- **Очистка системы**  
-  6 режимов очистки: кэш, dangling-образы, неиспользуемые тома/сети, образы без тегов, кэш BuildKit и полная «генеральная» уборка.
+- **System cleanup**  
+  6 cleanup modes: cache, dangling images, unused volumes/networks, untagged images, BuildKit cache, and a full “general” cleanup.
 
-- **Деплой на домен**  
-  Выбор между Traefik + Let's Encrypt и Cloudflare Tunnel. Встроенная преддеплойная диагностика (проверка DNS, доступности портов 80/443, наличия инструментов).
+- **Deploy to a domain**  
+  Choose between Traefik + Let's Encrypt and Cloudflare Tunnel. Built‑in pre‑deployment diagnostics (DNS checks, port 80/443 availability, tool presence).
 
-- **Умное кэширование**  
-  Централизованный CacheManager с инвалидацией по событиям и сбором метрик (hit rate).
+- **Smart caching**  
+  Centralised CacheManager with event‑based invalidation and metric collection (hit rate).
 
-- **Экономия ресурсов**  
-  Режим `economy_mode` автоматически отключает фоновые обновления для неактивных вкладок.
+- **Resource saving**  
+  `economy_mode` automatically disables background updates for inactive tabs.
 
-- **Статус окружения**  
-  Мгновенная проверка состояния WSL, containerd, BuildKit, nerdctl и cloudflared.
+- **Environment status**  
+  Instant verification of WSL, containerd, BuildKit, nerdctl, and cloudflared health.
 
 ---
 
-## ⚙️ Системные требования
+## ⚙️ System Requirements
 
-- Windows 10/11 с установленным WSL2
-- Дистрибутив Ubuntu 24.04 внутри WSL
-- Установленные в WSL компоненты:
+- Windows 10/11 with WSL2 installed
+- Ubuntu 24.04 distribution inside WSL
+- Components installed inside WSL:
   - `containerd`
   - `nerdctl`
   - `buildkitd`
-- (Опционально) `cloudflared` для использования Cloudflare Tunnel
+- (Optional) `cloudflared` for using Cloudflare Tunnel
 
 ---
 
-## 🚀 Быстрый старт
+## 🚀 Quick Start
 
-**Установите WSL и дистрибутив**
+**Install WSL and the distribution**
 
 <pre><code>wsl --install Ubuntu-24.04</code></pre>
 
-**Установите контейнерный стек внутри WSL**
+**Install the container stack inside WSL**
 
 <pre><code>sudo apt update &amp;&amp; sudo apt install -y containerd nerdctl buildkit
 sudo systemctl enable --now containerd buildkit</code></pre>
 
-**Соберите приложение**
+**Build the application**
 
 <pre><code>cd containerd-ui
 bash build.sh</code></pre>
 
-Запустите `containerd-ui.exe` и укажите путь к корню проекта (где лежит `compose.yaml`).
+Run `containerd-ui.exe` and point it to the root of your project (where `compose.yaml` is located).
 
-Проверьте статус во вкладке «Статус» – все иконки должны быть зелёными, затем можно собирать и деплоить проект.
-
----
-
-## 📚 Документация
-
-Подробные руководства и справочная информация находятся в папке [`containerd-ui/docs/`](containerd-ui/docs/):
-
-- [📄 README](containerd-ui/docs/README.md) — обзор документации и навигация по ней.
-- [🚀 Быстрый старт](containerd-ui/docs/quickstart.md) — установка и первый запуск.
-- [⚙️ Установка окружения](containerd-ui/docs/installation.md) — настройка WSL, containerd и BuildKit.
-- [🛠️ Конфигурация](containerd-ui/docs/configuration.md) — параметры и настройки приложения.
-- [🌐 Деплой на домен](containerd-ui/docs/deployment.md) — инструкции по Traefik и Cloudflare Tunnel.
-- [🩺 Диагностика](containerd-ui/docs/diagnostics.md) — проверка работоспособности и поиск ошибок.
-- [🧩 Образы и обновления](containerd-ui/docs/images-and-updates.md) — работа с образами и процесс обновления.
-- [📋 Требования к проекту](containerd-ui/docs/project-requirements.md) — необходимые зависимости и структура.
-- [🛟 Решение проблем](containerd-ui/docs/troubleshooting.md) — FAQ и частые ошибки.
-- [🧠 Архитектура и концепции](containerd-ui/docs/concepts.md) — внутреннее устройство и принципы работы.
+Check the status in the “Status” tab – all icons should be green, then you can build and deploy your project.
 
 ---
 
-## 📄 Лицензия
+## 📚 Documentation
 
-**Containerd UI** распространяется по модели двойного лицензирования:
+Detailed guides and reference information can be found in the [`containerd-ui/docs/`](containerd-ui/docs/) folder:
 
-- **Для личного, образовательного и внутреннего использования**  
-  (CI/CD, DevOps, мониторинг, автоматизация внутри компании) — бесплатно, при условии, что вы не продаёте доступ к самому Containerd UI как продукт или услугу третьим лицам. — **бесплатно** под лицензией [LICENSE](LICENSE).
-
-- **Для коммерческого использования**  
-  (SaaS на основе кода, продажа доступа к UI, встраивание в проприетарный продукт, перепродажа) — требуется **платная коммерческая лицензия**.
-
-📧 Для получения коммерческой лицензии или консультации: **soulbialogur@gmail.com**
-
-> ⚠️ **Важно:** Коммерческое использование без отдельной лицензии запрещено. Для легального использования в бизнесе — свяжитесь со мной, договоримся.
-
----
-
-💡 **Коротко:** Используйте бесплатно для своих проектов. Платите, только если продаёте сам UI.
+- [📄 README](containerd-ui/docs/README.md) — documentation overview and navigation.
+- [🚀 Quick Start](containerd-ui/docs/quickstart.md) — installation and first run.
+- [⚙️ Environment Setup](containerd-ui/docs/installation.md) — configuring WSL, containerd and BuildKit.
+- [🛠️ Configuration](containerd-ui/docs/configuration.md) — application parameters and settings.
+- [🌐 Deploy to a Domain](containerd-ui/docs/deployment.md) — instructions for Traefik and Cloudflare Tunnel.
+- [🩺 Diagnostics](containerd-ui/docs/diagnostics.md) — health checks and troubleshooting.
+- [🧩 Images and Updates](containerd-ui/docs/images-and-updates.md) — working with images and the update process.
+- [📋 Project Requirements](containerd-ui/docs/project-requirements.md) — required dependencies and structure.
+- [🛟 Troubleshooting](containerd-ui/docs/troubleshooting.md) — FAQ and common errors.
+- [🧠 Architecture and Concepts](containerd-ui/docs/concepts.md) — internal design and working principles.
 
 ---
 
-## ✉️ Контакты
+## 📄 License
 
-По всем вопросам, предложениям по развитию и сообщениям о безопасности обращайтесь по электронной почте:
+**Containerd UI** is distributed under a dual‑licensing model:
+
+- **For personal, educational, and internal use**  
+  (CI/CD, DevOps, monitoring, internal company automation) — free of charge, provided you do not sell access to Containerd UI itself as a product or service to third parties. — **free** under the [LICENSE](LICENSE).
+
+- **For commercial use**  
+  (SaaS based on the code, selling access to the UI, embedding in a proprietary product, resale) — a **paid commercial license** is required.
+
+📧 For commercial licensing or consultation: **soulbialogur@gmail.com**
+
+> ⚠️ **Important:** Commercial use without a separate license is prohibited. For legal business use — contact me, and we will work something out.
+
+---
+
+💡 **In short:** Use it free for your own projects. Pay only if you are selling the UI itself.
+
+---
+
+## ✉️ Contacts
+
+For any questions, development suggestions, or security reports, please email:
 
 📧 **soulbialogur@gmail.com**
 
-> 🔒 **Безопасность:**  
-> Сообщения об уязвимостях (security-issues) просим направлять **исключительно** на этот адрес.  
-> **Не создавайте публичные issue** с описанием проблем безопасности — это поможет избежать рисков для пользователей.
+> 🔒 **Security:**  
+> Please report vulnerabilities **exclusively** to this address.  
+> **Do not create public issues** describing security problems — this helps avoid risks for users.
 
 ---
 
-## 🧡 О проекте
+## 🧡 About the Project
 
 <div align="center">
 
-Сделано с ❤️ для разработчиков, которые работают с контейнерами в среде Windows.  
-Ваш фидбек и поддержка помогают проекту становиться лучше!
+Made with ❤️ for developers who work with containers in a Windows environment.  
+Your feedback and support help make the project better!
 
 </div>
