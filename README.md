@@ -99,21 +99,38 @@ Detailed guides and reference information can be found in the [`containerd-ui/do
 
 ## 📄 License
 
-**Containerd UI** is distributed under a dual‑licensing model:
+**Containerd UI** is licensed under the **GNU Affero General Public License, Version 3** (or any later version at your option).
 
-- **For personal, educational, and internal use**  
-  (CI/CD, DevOps, monitoring, internal company automation) — free of charge, provided you do not sell access to Containerd UI itself as a product or service to third parties. — **free** under the [LICENSE](LICENSE).
+Copyright (C) 2026 Bolsinov Nikita Aleksandrovich
 
-- **For commercial use**  
-  (SaaS based on the code, selling access to the UI, embedding in a proprietary product, resale) — a **paid commercial license** is required.
+The full license text is available from the Free Software Foundation:  
+[https://www.gnu.org/licenses/agpl-3.0.html](https://www.gnu.org/licenses/agpl-3.0.html)  
+Plain text version: [https://www.gnu.org/licenses/agpl-3.0.txt](https://www.gnu.org/licenses/agpl-3.0.txt)
 
-📧 For commercial licensing or consultation: **soulbialogur@gmail.com**
+### Dual Licensing
 
-> ⚠️ **Important:** Commercial use without a separate license is prohibited. For legal business use — contact me, and we will work something out.
+Subject to the terms of the GNU Affero General Public License, this project is also available under a **separate commercial license**. A commercial license may be obtained by written agreement with the copyright holder:
 
----
+- **Bolsinov Nikita Aleksandrovich**  
+  📧 **soulbialogur@gmail.com**
 
-💡 **In short:** Use it free for your own projects. Pay only if you are selling the UI itself.
+The commercial license is an alternative licensing option. It does not modify, restrict, or replace any rights granted by the GNU Affero General Public License. No fee, royalty, or other charge is required to exercise rights granted under the GNU Affero General Public License.
+
+### Attribution and Source Reference
+
+When you distribute this project or a modified version of it under the GNU Affero General Public License, you must retain all existing copyright notices and this license notice. You must also include the following attribution in the documentation, about dialog, or other prominent notices supplied with the covered work:
+
+> **Containerd UI**  
+> Copyright (C) 2026 Bolsinov Nikita Aleksandrovich  
+> Original project: [https://github.com/soulbialogur/containerd-ui](https://github.com/soulbialogur/containerd-ui)
+
+This requirement applies to distribution or public display of the covered work and does not restrict the freedoms granted by the GNU Affero General Public License.
+
+### Project Identity and Trademarks
+
+The names **"Containerd UI"**, the author's name, and the project logos or marks may not be used to endorse or promote a modified work without prior written permission, except for accurate factual statements about the origin of the work and ordinary copyright or license notices.
+
+This notice does not grant trademark rights and does not restrict the freedoms granted by the GNU Affero General Public License.
 
 ---
 
