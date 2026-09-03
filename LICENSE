@@ -13,46 +13,45 @@ https://www.gnu.org/licenses/agpl-3.0.html
 The license text is also available in plain text form at:
 https://www.gnu.org/licenses/agpl-3.0.txt
 
-Additional terms under Section 7 of the GNU Affero General Public License
-==========================================================================
+Dual licensing
+==============
 
-The following additional terms apply to this project under Section 7 of the
-GNU Affero General Public License. They do not limit the rights granted by
-the GNU Affero General Public License and do not prohibit commercial use.
+Subject to the terms of the GNU Affero General Public License, this project
+is also available under a separate commercial license. A commercial license
+may be obtained by written agreement with the copyright holder:
 
-1. Attribution and source reference
+  Болсинов Никита Александрович
+  soulbialogur@gmail.com
 
-When you distribute this project or a modified version of it, you must retain
-all existing copyright notices and this license notice. You must also include
-the following attribution in the documentation, about dialog, or other
-prominent notices supplied with the covered work:
+The commercial license is an alternative licensing option. It does not
+modify, restrict, or replace any rights granted by the GNU Affero General
+Public License. No fee, royalty, or other charge is required to exercise
+rights granted under the GNU Affero General Public License.
+
+Attribution and source reference
+================================
+
+When you distribute this project or a modified version of it under the GNU
+Affero General Public License, you must retain all existing copyright notices
+and this license notice. You must also include the following attribution in
+the documentation, about dialog, or other prominent notices supplied with
+the covered work:
 
   Containerd UI
   Copyright (C) 2026 Болсинов Никита Александрович
   Original project: https://github.com/soulbialogur/containerd-ui
 
-This requirement applies only to distribution or public display of the
-covered work. It does not require attribution for purely private use.
+This requirement applies to distribution or public display of the covered
+work and does not restrict the freedoms granted by the GNU Affero General
+Public License.
 
-2. Project identity and trademarks
+Project identity and trademarks
+==============================
 
-The names "Containerd UI", the author's name, and the
-project logos or marks may not be used to endorse or promote a modified work
-without prior written permission, except for accurate factual statements
-about the origin of the work and ordinary copyright or license notices.
+The names "Containerd UI", the author's name, and the project logos or marks
+may not be used to endorse or promote a modified work without prior written
+permission, except for accurate factual statements about the origin of the
+work and ordinary copyright or license notices.
 
-This additional term does not grant trademark rights and does not restrict
-the freedoms granted by the GNU Affero General Public License.
-
-3. Optional anonymous telemetry
-
-The project may include an opt-in mechanism for collecting anonymous technical
-telemetry solely to diagnose errors and improve the project. Telemetry must be
-disabled by default, clearly disclosed before activation, limited to technical
-data that does not identify a person, and must not be transmitted in an
-identifiable form to third parties. Users may use, modify, disable, or remove
-such telemetry under the GNU Affero General Public License.
-
-No additional term in this file is intended to restrict the rights to use,
-study, share, and modify the covered work, including commercial use, granted
-by the GNU Affero General Public License.
+This notice does not grant trademark rights and does not restrict the
+freedoms granted by the GNU Affero General Public License.
