@@ -90,6 +90,9 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	entryRefreshInterval := makeSettingEntry("Интервал обновления (сек)")
 	entryRefreshInterval.SetText(strconv.Itoa(config.AutoRefreshInterval))
 
+	entryIdleStopMinutes := makeSettingEntry("Автоостановка демона после простоя (мин)")
+	entryIdleStopMinutes.SetText(strconv.Itoa(config.IdleDaemonStopMinutes))
+
 	checkEconomyMode := widget.NewCheck("Режим экономии ресурсов", nil)
 	checkEconomyMode.SetChecked(config.EconomyMode)
 
@@ -141,6 +144,12 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	entryDeployEmail.SetPlaceHolder("admin@your-domain.com")
 	if config.DeployEmail != "" {
 		entryDeployEmail.SetText(config.DeployEmail)
+	}
+
+	entryDeployNetwork := makeSettingEntry("Имя внешней сети для деплоя")
+	entryDeployNetwork.SetText(config.DeployNetwork)
+	if config.DeployNetwork == "" {
+		entryDeployNetwork.SetText("soul-dialogue")
 	}
 
 	entryFrontendService := makeSettingEntry("Имя сервиса frontend (в docker-compose.yml)")
@@ -207,6 +216,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		entryMaxWSLCacheSize.SetText(strconv.FormatInt(cfg.MaxWSLCacheSize, 10))
 		entryWSLCacheCleanupAt.SetText(strconv.Itoa(cfg.WSLCacheCleanupAt))
 		entryRefreshInterval.SetText(strconv.Itoa(cfg.AutoRefreshInterval))
+		entryIdleStopMinutes.SetText(strconv.Itoa(cfg.IdleDaemonStopMinutes))
 		checkEconomyMode.SetChecked(cfg.EconomyMode)
 		entryCPU.SetText(cfg.DefaultCPU)
 		entryMemory.SetText(cfg.DefaultMemory)
@@ -233,6 +243,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		entryBackendPort.SetText(strconv.Itoa(cfg.DeployServiceBackendPort))
 		entryFrontendService.SetText(cfg.DeployServiceFrontend)
 		entryFrontendPort.SetText(strconv.Itoa(cfg.DeployServiceFrontendPort))
+		entryDeployNetwork.SetText(cfg.DeployNetwork)
 	}
 
 	// Обработчики кнопок
@@ -360,6 +371,11 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				cfg.AutoRefreshInterval = refresh
 			}
 		}
+		if idleStopStr := entryIdleStopMinutes.Text; idleStopStr != "" {
+			if idleStop, err := strconv.Atoi(idleStopStr); err == nil && idleStop > 0 {
+				cfg.IdleDaemonStopMinutes = idleStop
+			}
+		}
 		cfg.EconomyMode = checkEconomyMode.Checked
 
 		// Лимиты контейнеров
@@ -391,6 +407,9 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		cfg.DeployEmail = strings.TrimSpace(entryDeployEmail.Text)
 		cfg.DeployServiceBackend = strings.TrimSpace(entryBackendService.Text)
 		cfg.DeployServiceFrontend = strings.TrimSpace(entryFrontendService.Text)
+		if network := strings.TrimSpace(entryDeployNetwork.Text); network != "" {
+			cfg.DeployNetwork = network
+		}
 		if port, err := strconv.Atoi(entryBackendPort.Text); err == nil && port > 0 {
 			cfg.DeployServiceBackendPort = port
 		}
@@ -405,6 +424,9 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 		wsl.InitConfigCache(cfg)
 		SetEconomyMode(cfg.EconomyMode)
+		if cfg.IdleDaemonStopMinutes > 0 {
+			wsl.SetIdleDaemonThresholdForRuntime(cfg.IdleDaemonStopMinutes)
+		}
 		dialog.ShowCustom("Сохранено", "ОК", widget.NewLabel("Конфигурация успешно сохранена в config.json"), win)
 	}
 
@@ -491,6 +513,9 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 			widget.NewLabelWithStyle("Интервал автообновления (секунды)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryRefreshInterval),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle("Автоостановка демона после простоя (минуты)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			makeSettingRow(entryIdleStopMinutes),
 		),
 	)
 
@@ -538,6 +563,19 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			makeSettingRow(entryFrontendService),
 			serviceHint,
 		),
+	)
+
+	serviceCard.Content = container.NewVBox(
+		widget.NewLabelWithStyle("Имя внешней сети", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		makeSettingRow(entryDeployNetwork),
+		widget.NewLabel("Сеть должна быть объявлена в compose как external: true и подключена к сервисам."),
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Имя сервиса backend", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		makeSettingRow(entryBackendService),
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Имя сервиса frontend", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		makeSettingRow(entryFrontendService),
+		serviceHint,
 	)
 
 	limitCard := widget.NewCard("Лимиты контейнеров", "Задайте лимиты, которые будут применяться при запуске новых контейнеров",

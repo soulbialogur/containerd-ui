@@ -50,11 +50,7 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 		},
 	)
 
-	table.SetColumnWidth(0, 90)
-	table.SetColumnWidth(1, 280)
-	table.SetColumnWidth(2, 90)
-	table.SetColumnWidth(3, 110)
-	table.SetColumnWidth(4, 160)
+	responsiveTable := newResponsiveTable(table, []float32{55, 110, 55, 70, 85})
 
 	refresh := func() {
 		go func() {
@@ -112,5 +108,5 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 	topBar := container.NewHBox(btnRemove, btnRefresh)
 	refresh()
 
-	return container.NewBorder(topBar, nil, nil, nil, table)
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, responsiveTable))
 }

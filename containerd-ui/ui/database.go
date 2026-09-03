@@ -51,5 +51,5 @@ func BuildDatabaseTab() fyne.CanvasObject {
 
 	btnCheck.OnTapped()
 
-	return container.NewBorder(topBar, nil, nil, nil, filesList)
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, filesList))
 }

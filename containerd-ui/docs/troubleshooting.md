@@ -47,19 +47,19 @@ cloudflared tunnel list --credentials-file /path/to/credentials.json
 
 Если команда падает с ошибкой, обновите токен через Cloudflare Dashboard и сохраните его заново в приложении. Также стоит проверить, что `cloudflared` установлен и доступен в PATH.
 
-## Ошибка сети `soul-dialogue`
+## Ошибка внешней сети проекта
 
-Если сеть `soul-dialogue` не найдена, сначала проверьте [project-requirements.md](project-requirements.md): там описаны правильный `external`-блок, подключение сервисов и обязательный корень проекта. Если сеть нужно создать локально, можно использовать команду:
+Если сеть из `deploy_network` не найдена, сначала проверьте [project-requirements.md](project-requirements.md): там описаны правильный `external`-блок, подключение сервисов и корень проекта. Если сеть нужно создать локально, можно использовать команду:
 
 ```bash
-nerdctl network create --driver bridge soul-dialogue
+nerdctl network create --driver bridge my-project-network
 ```
 
-Но в compose-файле всё равно нужно оставить правильное объявление внешней сети, иначе деплой и маршрутизация будут работать некорректно.
+Но в compose-файле всё равно нужно оставить правильное объявление внешней сети и заменить `my-project-network` на значение `deploy_network`, иначе деплой и маршрутизация будут работать некорректно.
 
-## Compose-файл не содержит сеть `soul-dialogue`
+## Compose-файл не содержит настроенную внешнюю сеть
 
-Схема и пример правильного объявления находятся в [project-requirements.md](project-requirements.md). Там же показано, как подключать `backend` и `frontend` к сети `soul-dialogue`.
+Схема и пример правильного объявления находятся в [project-requirements.md](project-requirements.md). Там же показано, как подключать настроенные сервисы к сети из `deploy_network`.
 
 ## Путь к проекту содержит пробелы или кириллицу
 
@@ -102,7 +102,7 @@ nerdctl network create --driver bridge soul-dialogue
 
 ## Traefik не запускается
 
-Для полного сценария проверки деплоя см. [deployment.md](deployment.md) и [diagnostics.md](diagnostics.md). Важно проверить DNS, сетевой `soul-dialogue`, email ACME и доступность портов 80/443.
+Для полного сценария проверки деплоя см. [deployment.md](deployment.md) и [diagnostics.md](diagnostics.md). Важно проверить DNS, сеть из `deploy_network`, email ACME и доступность портов 80/443.
 
 ## Cloudflare Tunnel не работает
 
@@ -119,9 +119,9 @@ cloudflared tunnel list --credentials-file /path/to/credentials.json
 
 ```yaml
 networks:
-  soul-dialogue:
+  my-project-network:
     external: true
-    name: soul-dialogue
+    name: my-project-network
 ```
 
 И что backend/frontend подключены к этой сети.

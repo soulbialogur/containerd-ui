@@ -80,6 +80,8 @@ func getAllComponentsStatus() []ComponentStatus {
 
 	// Получаем версии компонентов
 	versions := getComponentVersions()
+	distro := wsl.GetWslDistro()
+	versions["WSL"] = distro
 
 	var result []ComponentStatus
 	if err != nil {
@@ -100,9 +102,9 @@ func getAllComponentsStatus() []ComponentStatus {
 			}
 
 			if strings.Contains(line, "WSL:OK") {
-				result = append(result, ComponentStatus{Name: "WSL", Version: versions["WSL"], Icon: "✅", Active: true, Detail: wsl.GetWslDistro()})
+				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "✅", Active: true, Detail: "активен"})
 			} else if strings.Contains(line, "WSL:NO") {
-				result = append(result, ComponentStatus{Name: "WSL", Version: versions["WSL"], Icon: "❌", Active: false, Detail: "Не найден"})
+				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "⚠️", Active: false, Detail: "остановлен"})
 			}
 
 			if strings.Contains(line, "CONTAINERD:OK") {
@@ -203,51 +205,47 @@ func getComponentVersions() map[string]string {
 // Пример: "containerd github.com/containerd/containerd/v2 v2.1.4-0.20250430162418-..." → "v2.1.4"
 // Пример: "buildctl github.com/moby/buildkit v0.15.1" → "v0.15.1"
 func shortVersion(raw string) string {
-    raw = strings.TrimSpace(raw)
-    if raw == "" {
-        return "—"
-    }
-    // Ищем последовательность цифр, разделённых точками (три группы)
-    re := regexp.MustCompile(`v?(\d+\.\d+\.\d+)`)
-    match := re.FindStringSubmatch(raw)
-    if len(match) > 0 {
-        // match[0] — полное совпадение (например, "v2.1.4" или "2.1.4")
-        if strings.HasPrefix(match[0], "v") {
-            return match[0]
-        }
-        return "v" + match[1]
-    }
-    // fallback: если ничего не найдено, возвращаем первые два слова
-    parts := strings.Fields(raw)
-    if len(parts) >= 2 {
-        return parts[0] + " " + parts[1]
-    }
-    return raw
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "—"
+	}
+	// Ищем последовательность цифр, разделённых точками (три группы)
+	re := regexp.MustCompile(`v?(\d+\.\d+\.\d+)`)
+	match := re.FindStringSubmatch(raw)
+	if len(match) > 0 {
+		// match[0] — полное совпадение (например, "v2.1.4" или "2.1.4")
+		if strings.HasPrefix(match[0], "v") {
+			return match[0]
+		}
+		return "v" + match[1]
+	}
+	// fallback: если ничего не найдено, возвращаем первые два слова
+	parts := strings.Fields(raw)
+	if len(parts) >= 2 {
+		return parts[0] + " " + parts[1]
+	}
+	return raw
 }
 
 // BuildStatusTab — главная функция построения вкладки статуса (Панель приборов)
 func BuildStatusTab() fyne.CanvasObject {
-	// Метки для статусных карточек
-	wslLabel := widget.NewLabel("Загрузка...")
-	containerdLabel := widget.NewLabel("Загрузка...")
-	buildkitdLabel := widget.NewLabel("Загрузка...")
-	nerdctlLabel := widget.NewLabel("Загрузка...")
-
-	// Создаём компонентные карточки
-	wslCard := widget.NewCard("WSL", "", wslLabel)
-	containerdCard := widget.NewCard("Containerd", "", containerdLabel)
-	buildkitdCard := widget.NewCard("Buildkitd", "", buildkitdLabel)
-	nerdctlCard := widget.NewCard("Nerdctl", "", nerdctlLabel)
+	// Создаём компонентные карточки, которые скрывают версии при сжатии.
+	wslCard := newResponsiveStatusCard("WSL")
+	containerdCard := newResponsiveStatusCard("Containerd")
+	buildkitdCard := newResponsiveStatusCard("Buildkitd")
+	nerdctlCard := newResponsiveStatusCard("Nerdctl")
 
 	// Идеально ровная таблица (без HBox внутри ячеек)
 	table := widget.NewTable(
 		func() (int, int) {
 			statusCache.RLock()
 			defer statusCache.RUnlock()
-			return len(statusCache.data) + 1, 4
+			return len(statusCache.data) + 1, 3
 		},
 		func() fyne.CanvasObject {
-			return widget.NewLabel("") // ОДИН лейбл на ячейку = идеальный рендеринг
+			label := widget.NewLabel("")
+			label.Wrapping = fyne.TextTruncate
+			return label
 		},
 		func(id widget.TableCellID, o fyne.CanvasObject) {
 			label := o.(*widget.Label)
@@ -263,8 +261,6 @@ func BuildStatusTab() fyne.CanvasObject {
 					label.SetText("Версия")
 				case 2:
 					label.SetText("Статус")
-				case 3:
-					label.SetText("Детали")
 				}
 				return
 			}
@@ -286,15 +282,12 @@ func BuildStatusTab() fyne.CanvasObject {
 				}
 			case 2:
 				label.SetText(cs.Icon + " " + wsl.TranslateStatus(cs.Detail))
-			case 3:
-				label.SetText(cs.Detail)
 			}
 		},
 	)
-	table.SetColumnWidth(0, 150)
-	table.SetColumnWidth(1, 200)
-	table.SetColumnWidth(2, 200)
-	table.SetColumnWidth(3, 300)
+	table.SetColumnWidth(0, 110)
+	table.SetColumnWidth(1, 130)
+	table.SetColumnWidth(2, 190)
 
 	// Метка последней проверки
 	lastCheckLabel := widget.NewLabel("Последняя проверка: —")
@@ -308,21 +301,22 @@ func BuildStatusTab() fyne.CanvasObject {
 		statuses := getAllComponentsStatus()
 		for _, cs := range statuses {
 			statusText := cs.Icon
-            if cs.Version != "" {
-            statusText += " " + cs.Version
-            }
-            if cs.Detail != "" {
-            statusText += " (" + wsl.TranslateStatus(cs.Detail) + ")"
-            }
+			if cs.Version != "" {
+				statusText += " " + cs.Version
+			}
+			if cs.Detail != "" {
+				statusText += " (" + wsl.TranslateStatus(cs.Detail) + ")"
+			}
+			compactStatus := cs.Icon + " " + wsl.TranslateStatus(cs.Detail)
 			switch cs.Name {
 			case "WSL":
-				wslLabel.SetText(statusText)
+				wslCard.SetStatus(statusText, compactStatus)
 			case "Containerd":
-				containerdLabel.SetText(statusText)
+				containerdCard.SetStatus(statusText, compactStatus)
 			case "Buildkitd":
-				buildkitdLabel.SetText(statusText)
+				buildkitdCard.SetStatus(statusText, compactStatus)
 			case "Nerdctl":
-				nerdctlLabel.SetText(statusText)
+				nerdctlCard.SetStatus(statusText, compactStatus)
 			}
 		}
 		lastCheckLabel.SetText("Последняя проверка: " + time.Now().Format("15:04:05"))
@@ -367,13 +361,13 @@ func BuildStatusTab() fyne.CanvasObject {
 	// Регистрируем tabActive в глобальной карте по имени вкладки
 	registerTabNamed("Статус", tab)
 
-	return container.NewBorder(
+	return withVerticalScroll(container.NewBorder(
 		container.NewVBox(
 			// Панель инструментов
 			container.NewHBox(btnRefresh, autoRefresh, layout.NewSpacer(), lastCheckLabel),
 			widget.NewSeparator(),
 			// Дашборд из 4 карточек
-			container.NewAdaptiveGrid(4, wslCard, containerdCard, buildkitdCard, nerdctlCard),
+			container.NewAdaptiveGrid(4, wslCard.CanvasObject(), containerdCard.CanvasObject(), buildkitdCard.CanvasObject(), nerdctlCard.CanvasObject()),
 			// Панель управления Buildkitd
 			container.NewHBox(
 				widget.NewLabelWithStyle("Управление Buildkitd:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -386,5 +380,5 @@ func BuildStatusTab() fyne.CanvasObject {
 		nil, nil, nil,
 		// Сама таблица
 		table,
-	)
+	))
 }

@@ -109,7 +109,9 @@ getent hosts example.com
 
 Перед деплоем домен должен корректно резолвиться и указывать на целевой сервер.
 
-## 7. Проверка сети `soul-dialogue`
+## 7. Проверка внешней сети проекта
+
+Используйте имя сети из `deploy_network` в `config.json`. Ниже `my-project-network` — пример, замените его на своё значение.
 
 Проверить, что сеть существует:
 
@@ -120,16 +122,16 @@ nerdctl network ls
 Если её нет, можно создать вручную:
 
 ```bash
-nerdctl network create --driver bridge soul-dialogue
+nerdctl network create --driver bridge my-project-network
 ```
 
 Но в compose-файле она всё равно должна быть объявлена как external:
 
 ```yaml
 networks:
-  soul-dialogue:
+  my-project-network:
     external: true
-    name: soul-dialogue
+    name: my-project-network
 ```
 
 ## 8. Проверка project path
@@ -154,7 +156,7 @@ project/
 - `containerd`, `nerdctl`, `buildkitd`;
 - порты и DNS;
 - Cloudflare credentials;
-- сеть `soul-dialogue`.
+- сеть из `deploy_network`.
 
 Подробнее:
 

@@ -26,25 +26,25 @@ nerdctl images
 
 ```bash
 cd /path/to/project
-nerdctl build --progress=plain --tag soul-dialogue/backend:latest --file backend/Dockerfile ./backend
+nerdctl build --progress=plain --tag my-project/backend:latest --file backend/Dockerfile ./backend
 ```
 
 Сборка с переопределением имени и тега:
 
 ```bash
-nerdctl build --progress=plain --tag my-registry/soul-dialogue/backend:v1.2.0 --file backend/Dockerfile ./backend
+nerdctl build --progress=plain --tag my-registry/my-project/backend:v1.2.0 --file backend/Dockerfile ./backend
 ```
 
 Проверка, что образ собран и виден в локальном реестре:
 
 ```bash
-nerdctl image inspect soul-dialogue/backend:latest
+nerdctl image inspect my-project/backend:latest
 ```
 
 Удаление образа:
 
 ```bash
-nerdctl rmi soul-dialogue/backend:latest
+nerdctl rmi my-project/backend:latest
 ```
 
 Удаление образов без тега:
@@ -59,15 +59,15 @@ nerdctl images -q | xargs -r nerdctl rmi
 
 Для локальной разработки удобно использовать теги вида:
 
-- `soul-dialogue/backend:latest`
-- `soul-dialogue/frontend:latest`
-- `soul-dialogue/postgres:latest`
+- `my-project/backend:latest`
+- `my-project/frontend:latest`
+- `my-project/postgres:latest`
 
 Для версии релиза лучше использовать:
 
-- `soul-dialogue/backend:v1.2.0`
-- `soul-dialogue/frontend:v1.2.0`
-- `soul-dialogue/postgres:v1.2.0`
+- `my-project/backend:v1.2.0`
+- `my-project/frontend:v1.2.0`
+- `my-project/postgres:v1.2.0`
 
 Так проще:
 
@@ -141,7 +141,7 @@ nerdctl compose up -d --build
 - BuildKit запущен;
 - проект собирается и запускается без ошибок;
 - DNS и порты `80/443` не конфликтуют;
-- `soul-dialogue` существует и привязан корректно.
+- внешняя сеть из `deploy_network` существует и привязана корректно.
 
 Полный набор проверок есть в [diagnostics.md](diagnostics.md).
 
@@ -177,9 +177,9 @@ nerdctl compose up -d --build
 
 ## 4. Лицензирование
 
-Лицензия проекта хранится в корне репозитория в файле [LICENSE](../../LICENSE).
+Лицензия проекта хранится в файле [Others/LICENSE](../../Others/LICENSE).
 
-Текущий вариант лицензии комбинирует условия Apache License 2.0 с дополнительным ограничением по коммерческому использованию и требованием указания авторства. Перед распространением, публикацией сборки или использованием в коммерческих сценариях важно убедиться, что условия лицензии соблюдены полностью.
+Проект распространяется по GNU Affero General Public License v3 с дополнительными условиями по статье 7: сохранение авторских уведомлений и ссылки на исходный репозиторий, а также ограничения на использование названия и товарных знаков проекта. AGPLv3 не запрещает коммерческое использование, но требует соблюдать её условия при распространении и предоставлении функциональности через сеть.
 
 Также следует учитывать отдельные лицензии сторонних компонентов, библиотек, контейнерных образов и утилит, которые используются в проекте или в среде WSL.
 

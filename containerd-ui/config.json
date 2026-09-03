@@ -1,5 +1,5 @@
 {
-  "project_path": "C:\\Users\\User\\...containerd-ui",
+  "project_path": "C:\\Users\\Пользователь\\OneDrive\\Рабочий стол\\ai-chatbot-website",
   "wsl_distro": "Ubuntu-24.04",
   "cd_port": 50051,
   "cd_namespace": "default",
@@ -38,6 +38,7 @@
   "buildkit_cache_ttl": 24,
   "buildkit_max_size": "5g",
   "deployment_proxy": "traefik",
+  "deploy_network": "soul-dialogue",
   "deploy_service_backend": "backend",
   "deploy_service_frontend": "frontend",
   "deploy_service_backend_port": 8000,

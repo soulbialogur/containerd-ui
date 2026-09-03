@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"containerd-ui/wsl"
+	"fmt"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -10,38 +11,62 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// Функция safeUI объявлена в containers.go, здесь она не нужна
-
 func BuildCleanTab() fyne.CanvasObject {
 	lblResult := widget.NewLabel("")
 	lblResult.TextStyle = fyne.TextStyle{Bold: false}
-	lblResult.Wrapping = fyne.TextTruncate
-	
-	// Оборачиваем в скролл-контейнер с фиксированной высотой
+	lblResult.Wrapping = fyne.TextWrapWord
+
 	resultScroll := container.NewScroll(lblResult)
 	resultScroll.SetMinSize(fyne.NewSize(0, 200))
+
+	formatCacheResult := func(result string, err error) string {
+		if err != nil {
+			return "❌ Очистка не выполнена\n\n" + err.Error()
+		}
+
+		lines := make([]string, 0)
+		for _, line := range strings.Split(strings.TrimSpace(result), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+		if len(lines) == 0 {
+			lines = append(lines, "Удалять нечего — кэш уже чист")
+		}
+
+		return "✅ Очистка завершена\n\n" +
+			"🧹 Кэш и dangling-образы\n" +
+			"Удалены временные и неиспользуемые данные.\n\n" +
+			strings.Join(lines, "\n")
+	}
 
 	// Кнопка 1: Очистка кэша и dangling-образов
 	btnCache := widget.NewButton("Очистить кэш и dangling-образы", nil)
 	btnCache.OnTapped = func() {
 		safeUI(func() {
-			lblResult.SetText("Выполняется очистка кэша...")
+			lblResult.SetText("⏳ Очистка кэша и dangling-образов...\n\nПроверяем и удаляем неиспользуемые данные.")
 			btnCache.Disable()
 		})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnCache.Enable()
+						btnCache.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
 			select {
 			case <-wsl.AppContext().Done():
 				return
 			default:
 			}
-
 			res, err := wsl.CleanNerdctlCache()
 			safeUI(func() {
-				if err != nil {
-					lblResult.SetText("Ошибка: " + err.Error())
-				} else {
-					lblResult.SetText("✅ " + res)
-				}
+				lblResult.SetText(formatCacheResult(res, err))
 				btnCache.Enable()
 				btnCache.Refresh()
 				lblResult.Refresh()
@@ -57,9 +82,18 @@ func BuildCleanTab() fyne.CanvasObject {
 			btnVolumes.Disable()
 		})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnVolumes.Enable()
+						btnVolumes.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
-
 			res, err := wsl.CleanUnusedVolumes(ctx)
 			safeUI(func() {
 				if err != nil {
@@ -82,9 +116,18 @@ func BuildCleanTab() fyne.CanvasObject {
 			btnNetworks.Disable()
 		})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnNetworks.Enable()
+						btnNetworks.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
-
 			res, err := wsl.CleanUnusedNetworks(ctx)
 			safeUI(func() {
 				if err != nil {
@@ -107,9 +150,18 @@ func BuildCleanTab() fyne.CanvasObject {
 			btnImages.Disable()
 		})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnImages.Enable()
+						btnImages.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
-
 			res, err := wsl.CleanUntaggedImages(ctx)
 			safeUI(func() {
 				if err != nil {
@@ -132,9 +184,18 @@ func BuildCleanTab() fyne.CanvasObject {
 			btnBuildkit.Disable()
 		})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnBuildkit.Enable()
+						btnBuildkit.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
-
 			res, err := wsl.CleanBuildkitCache(ctx)
 			safeUI(func() {
 				if err != nil {
@@ -157,6 +218,16 @@ func BuildCleanTab() fyne.CanvasObject {
 			btnFull.Disable()
 		})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnFull.Enable()
+						btnFull.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 
@@ -193,7 +264,6 @@ func BuildCleanTab() fyne.CanvasObject {
 				} else {
 					lblResult.SetText("✅ Всё чисто! Нечего удалять.")
 				}
-
 				btnFull.Enable()
 				btnFull.Refresh()
 				lblResult.Refresh()
@@ -209,7 +279,7 @@ func BuildCleanTab() fyne.CanvasObject {
 		"🖼️ Образы без тегов — удаляет все образы без тегов (не только dangling, но и все незафиксированные)\n\n" +
 		"⚠️ Внимание: перед полной очисткой рекомендуется проверить список ресурсов.")
 
-	return container.NewVBox(
+	return withResponsiveScroll(container.NewVBox(
 		widget.NewLabelWithStyle("Очистка системы", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		infoLabel,
 		container.NewVBox(
@@ -222,5 +292,5 @@ func BuildCleanTab() fyne.CanvasObject {
 			widget.NewLabelWithStyle("Результат:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			resultScroll,
 		),
-	)
+	))
 }

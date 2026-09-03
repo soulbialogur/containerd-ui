@@ -110,8 +110,8 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 	})
 
 	btnRefresh := widget.NewButton("Обновить", refresh)
-	topBar := container.NewHBox(btnCreate, btnRemove, btnRefresh)
+	topBar := container.NewAdaptiveGrid(3, btnCreate, btnRemove, btnRefresh)
 	refresh()
 
-	return container.NewBorder(topBar, details, nil, nil, list)
+	return withResponsiveScroll(container.NewBorder(topBar, details, nil, nil, list))
 }

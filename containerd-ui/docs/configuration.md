@@ -22,7 +22,7 @@
   "cd_port": 50051,
   "cd_namespace": "default",
   "scripts_path": "scripts/containerd",
-  "db_volume_name": "soul-dialogue-postgres-data",
+  "db_volume_name": "my-project-postgres-data",
   "systemd_service": "containerd",
   "nerdctl_path": "",
   "log_tail": 100,
@@ -45,6 +45,7 @@
   "buildkit_max_size": "5g",
   "deployment_proxy": "traefik",
   "deploy_email": "admin@example.com",
+  "deploy_network": "my-project-network",
   "deploy_service_backend": "backend",
   "deploy_service_frontend": "frontend",
   "deploy_service_backend_port": 8000,
@@ -63,7 +64,7 @@
 | `cd_port` | Порт gRPC контейнерного runtime (`containerd`) | `50051` |
 | `cd_namespace` | Namespace для containerd API | `default` |
 | `scripts_path` | Подпапка со скриптами для контейнерных операций | `scripts/containerd` |
-| `db_volume_name` | Имя тома PostgreSQL, используемого в вкладке «База данных» | `soul-dialogue-postgres-data` |
+| `db_volume_name` | Имя тома PostgreSQL, используемого в вкладке «База данных» | `""` |
 | `systemd_service` | Имя systemd-сервиса для контейнерной среды | `containerd` |
 | `nerdctl_path` | Путь к `nerdctl`; если пусто, используется PATH | `""` |
 | `log_tail` | Сколько строк логов показывать в интерфейсе | `100` |
@@ -86,6 +87,7 @@
 | `buildkit_max_size` | Максимальный размер кэша BuildKit, например `"5g"` | `"5g"` |
 | `deployment_proxy` | Выбранный прокси: `traefik` или `cloudflare` | `traefik` |
 | `deploy_email` | Email для Let's Encrypt / ACME, используется при выпуске сертификата | `""` |
+| `deploy_network` | Имя внешней сети для прокси и сервисов | `soul-dialogue` |
 | `deploy_service_backend` | Имя backend-сервиса в Compose | `backend` |
 | `deploy_service_frontend` | Имя frontend-сервиса в Compose | `frontend` |
 | `deploy_service_backend_port` | Внутренний порт backend внутри контейнера | `8000` |
@@ -215,7 +217,7 @@
 - `deploy_service_backend_port` и `deploy_service_frontend_port` должны совпадать с фактическими внутренними портами контейнеров;
 - `deployment_proxy` должно быть `traefik` или `cloudflare`;
 - `deploy_email` лучше задавать реальный рабочий email;
-- для деплоя проект должен содержать внешнюю сеть `soul-dialogue`, требования к которой описаны в [project-requirements.md](project-requirements.md).
+- для деплоя проект должен содержать внешнюю сеть с именем из `deploy_network`; требования к ней описаны в [project-requirements.md](project-requirements.md).
 
 ## Что происходит, если поля пустые
 
@@ -223,6 +225,7 @@
 
 - `wsl_distro = Ubuntu-24.04`
 - `deployment_proxy = traefik`
+- `deploy_network = soul-dialogue` (для старых конфигураций; рекомендуется задать имя сети проекта явно)
 - `deploy_service_backend = backend`
 - `deploy_service_frontend = frontend`
 - `deploy_service_backend_port = 8000`
