@@ -66,7 +66,7 @@ nerdctl network create --driver bridge my-project-network
 Код поддерживает такие пути, но убедитесь, что WSL корректно монтирует директорию. Обычно Windows-папки выглядят так:
 
 ```bash
-/mnt/c/Users/Пользователь/OneDrive/Рабочий\ стол/project
+/mnt/c/Users/User/OneDrive/Рабочий\ стол/project
 ```
 
 Если приложение не видит проект, проверьте, что путь в настройках соответствует реальному WSL-формату и что папка смонтирована без ошибок.
@@ -146,7 +146,7 @@ wsl -d Ubuntu-24.04 -- nerdctl compose -f /path/to/compose.yaml config
 Пример запуска:
 
 ```powershell
-cd "C:\Users\Пользователь\OneDrive\Рабочий стол\ai-chatbot-website\containerd-ui"
+cd "C:\Users\User\OneDrive\Рабочий стол\project"
 .
 \containerd-ui.exe
 ```

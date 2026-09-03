@@ -41,7 +41,7 @@ sudo apt install -y containerd nerdctl
 Из папки контейнера:
 
 ```powershell
-cd "C:\Users\Пользователь\OneDrive\Рабочий стол\ai-chatbot-website\containerd-ui"
+cd "C:\Users\User\OneDrive\Рабочий стол\project"
 bash build.sh
 ```
 
