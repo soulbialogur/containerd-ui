@@ -296,7 +296,7 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	))
 
 	cardActions := widget.NewCard("Действия", "", container.NewVBox(
-		container.NewHBox(btnDeploy, btnRollback, btnLogs),
+		container.NewAdaptiveGrid(3, btnDeploy, btnRollback, btnLogs),
 		status,
 	))
 

@@ -120,19 +120,6 @@ func (cm *CacheManager) Invalidate(eventType CacheEventType, reason string) {
 	}
 
 	cm.Publish(event)
-
-	switch eventType {
-	case CacheEventContainers:
-		CDInvalidateContainersCache()
-	case CacheEventImages:
-		CDInvalidateImagesCache()
-	case CacheEventVolumes:
-		CDInvalidateVolumesCache()
-	case CacheEventStats:
-		CDInvalidateStatsCache()
-	case CacheEventAll:
-		CDInvalidateAllCaches()
-	}
 }
 
 // GetRecentEvents получить последние N событий

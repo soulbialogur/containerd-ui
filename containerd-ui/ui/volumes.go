@@ -11,7 +11,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-
 func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 	var volumes []wsl.Volume
 	selectedName := ""
@@ -52,9 +51,9 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 		},
 	)
 
-	table.SetColumnWidth(0, 300)
-	table.SetColumnWidth(1, 100)
-	table.SetColumnWidth(2, 350)
+	table.SetColumnWidth(0, 100)
+	table.SetColumnWidth(1, 60)
+	table.SetColumnWidth(2, 140)
 
 	// Debounce для refresh — защита от частых вызовов
 	var refreshTimer *time.Timer
@@ -127,5 +126,5 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 	topBar := container.NewHBox(btnRemove, btnRefresh)
 	refresh()
 
-	return container.NewBorder(topBar, nil, nil, nil, table)
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, table))
 }

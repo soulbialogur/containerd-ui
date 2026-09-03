@@ -136,5 +136,5 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	_ = strings.TrimSpace
 	_ = win
 
-	return container.NewBorder(topBar, nil, nil, nil, logText)
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, logText))
 }

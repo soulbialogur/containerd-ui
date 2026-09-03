@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func TestCacheManagerInvalidateDoesNotRecurse(t *testing.T) {
+	events := []CacheEventType{
+		CacheEventContainers,
+		CacheEventImages,
+		CacheEventVolumes,
+		CacheEventStats,
+	}
+
+	for _, eventType := range events {
+		GlobalCacheManager.Invalidate(eventType, "test")
+	}
+}
+
 func TestValidateDomainRejectsShellMetacharacters(t *testing.T) {
 	bad := []string{
 		"example.com;id",

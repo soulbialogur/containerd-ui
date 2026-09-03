@@ -318,8 +318,8 @@ var (
 	statsCache           = newTypedCache[[]ContainerStat](5 * time.Second)
 	containerStatusCache = newContainerStatusCache(statusCacheTTL)
 
-	splitImageCache = newBoundedTypedCache[[2]string](30 * time.Second, 500)
-	humanSizeCache  = newBoundedTypedCache[string](1 * time.Minute, 500)
+	splitImageCache = newBoundedTypedCache[[2]string](30*time.Second, 500)
+	humanSizeCache  = newBoundedTypedCache[string](1*time.Minute, 500)
 )
 
 // ---------------------------------------------------------------------------
@@ -336,13 +336,66 @@ var (
 	appCtx      context.Context
 	appCancel   context.CancelFunc
 
-	cdMu      sync.Mutex
-	cdIPValid atomic.Bool
+	cdMu              sync.Mutex
+	cdIPValid         atomic.Bool
+	lastActivityTime  atomic.Int64
+	idleStopThreshold = 2 * time.Minute
 )
 
 func init() {
 	cdBaseCtx = namespaces.WithNamespace(context.Background(), GetCdNamespace())
 	appCtx, appCancel = context.WithCancel(context.Background())
+	lastActivityTime.Store(time.Now().UnixNano())
+	startIdleDaemonController()
+}
+
+func setIdleDaemonThreshold(minutes int) {
+	if minutes > 0 {
+		idleStopThreshold = time.Duration(minutes) * time.Minute
+		return
+	}
+	idleStopThreshold = 2 * time.Minute
+}
+
+// SetIdleDaemonThresholdForRuntime применяет таймаут автопаузы без перезапуска UI.
+func SetIdleDaemonThresholdForRuntime(minutes int) {
+	setIdleDaemonThreshold(minutes)
+}
+
+func markDaemonActivity() {
+	lastActivityTime.Store(time.Now().UnixNano())
+}
+
+func startIdleDaemonController() {
+	go func() {
+		for {
+			select {
+			case <-appCtx.Done():
+				return
+			case <-time.After(15 * time.Second):
+				last := time.Unix(0, lastActivityTime.Load())
+				if !last.IsZero() && time.Since(last) >= idleStopThreshold {
+					_ = stopIdleDaemon()
+				}
+			}
+		}
+	}()
+}
+
+func stopIdleDaemon() error {
+	cdMu.Lock()
+	defer cdMu.Unlock()
+	if cdConn != nil {
+		_ = cdConn.Close()
+		cdConn = nil
+	}
+	if cdClient != nil {
+		_ = cdClient.Close()
+		cdClient = nil
+	}
+	cdAvailable.Store(false)
+	cdErr = nil
+	return nil
 }
 
 // DetectWSLIP возвращает IP-адрес WSL2
@@ -354,7 +407,7 @@ func detectWSLIP(forceRefresh bool) string {
 	if !forceRefresh && cdIP != "" && cdIPValid.Load() {
 		return cdIP
 	}
-	cmd := exec.Command("wsl", "hostname", "-I")
+	cmd := exec.Command("wsl", "-d", GetWslDistro(), "hostname", "-I")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()
 	if err != nil {
@@ -600,12 +653,12 @@ func CDGetContainerConfig(id string) (*ContainerConfig, error) {
 
 // ContainerStatJSON структура для JSON-парсинга nerdctl stats
 type ContainerStatJSON struct {
-	ID        string `json:"ID"`
-	Name      string `json:"Name"`
-	CPUPerc   string `json:"CPUPerc"`
-	MemUsage  string `json:"MemUsage"`
-	NetIO     string `json:"NetIO"`
-	PIDs      string `json:"PIDs"`
+	ID       string `json:"ID"`
+	Name     string `json:"Name"`
+	CPUPerc  string `json:"CPUPerc"`
+	MemUsage string `json:"MemUsage"`
+	NetIO    string `json:"NetIO"`
+	PIDs     string `json:"PIDs"`
 }
 
 // CDGetStats получает статистику через nerdctl stats с JSON форматом
@@ -1097,8 +1150,8 @@ var imageSizeCache = struct {
 	totalSize int64
 	maxSize   int64
 }{
-	m:      make(map[string]int64),
-	maxLen: 200,
+	m:       make(map[string]int64),
+	maxLen:  200,
 	maxSize: maxImageSizeCacheBytes,
 }
 

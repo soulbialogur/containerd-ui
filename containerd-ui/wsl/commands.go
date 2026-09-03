@@ -1013,7 +1013,7 @@ func CleanContainerdLogs() (string, error) {
 	return out, err
 }
 
-// Очистка кэша (через containerd API, без nerdctl)
+// Очистка кэша и dangling-образов через wsl.exe и nerdctl.
 // Кэширует результат на 10 секунд
 var cleanCache = struct {
 	sync.RWMutex
@@ -1035,7 +1035,10 @@ func CleanNerdctlCache() (string, error) {
 	}
 	cleanCache.RUnlock()
 
-	res, err := CDCleanSystem()
+	res, err := RunWSL("nerdctl system prune --force 2>&1")
+	if err == nil && strings.TrimSpace(res) == "" {
+		res = "Система чиста — нечего удалять"
+	}
 
 	cleanCache.Lock()
 	cleanCache.data = res
@@ -1046,64 +1049,18 @@ func CleanNerdctlCache() (string, error) {
 	return res, err
 }
 
-// CleanUnusedVolumes удаляет все тома, которые не используются контейнерами.
-// Использует gRPC для определения используемых томов и WSL для списка/удаления.
+// CleanUnusedVolumes удаляет все неиспользуемые тома через wsl.exe и nerdctl.
 func CleanUnusedVolumes(ctx context.Context) (string, error) {
-	// 1. Получаем список ВСЕХ томов (через WSL, т.к. containerd не хранит тома как объекты)
-	volOut, err := RunWSLWithCancel(ctx, "nerdctl volume ls --format '{{.Name}}' 2>/dev/null")
+	result, err := RunWSLWithCancel(ctx, "nerdctl volume prune --force 2>&1")
 	if err != nil {
-		return "", err
+		return result, fmt.Errorf("не удалось очистить неиспользуемые тома через wsl.exe: %w", err)
 	}
-	allVolumes := strings.Split(volOut, "\n")
-	if len(allVolumes) == 0 {
-		return "Нет томов для очистки", nil
-	}
-	// 2. Получаем используемые тома через gRPC
-	usedVolumes, err := CDGetUsedVolumes(ctx)
-	if err != nil {
-		return "Не удалось получить используемые тома", err
-	}
-	// 3. Собираем неиспользуемые
-	var unusedVols []string
-	for _, vol := range allVolumes {
-		vol = strings.TrimSpace(vol)
-		if vol == "" || usedVolumes[vol] {
-			continue
-		}
-		unusedVols = append(unusedVols, vol)
-	}
-	if len(unusedVols) == 0 {
-		return "Неиспользуемые тома не найдены", nil
-	}
-	// 4. Удаляем неиспользуемые тома (через WSL)
-	var removedVol int
-	var results []string
-	// Пробуем batch-удаление
-	volCmd := fmt.Sprintf("nerdctl volume rm -f %s 2>/dev/null", strings.Join(unusedVols, " "))
-	_, err = RunWSLWithCancel(ctx, volCmd)
-	if err != nil {
-		// Если batch не сработал, удаляем по одному
-		for _, vol := range unusedVols {
-			if _, err := RunWSLWithCancel(ctx, fmt.Sprintf("nerdctl volume rm -f %s 2>/dev/null", vol)); err == nil {
-				removedVol++
-				results = append(results, "Удалён том: "+vol)
-			}
-		}
-		if removedVol > 0 {
-			CDInvalidateVolumesCache()
-			CDInvalidateContainersCache()
-			return fmt.Sprintf("Удалено неиспользуемых томов: %d\n%s", removedVol, strings.Join(results, "\n")), nil
-		}
-		return "", fmt.Errorf("не удалось удалить ни один том: %w", err)
-	}
-	// Batch-удаление успешно
-	for _, vol := range unusedVols {
-		removedVol++
-		results = append(results, "Удалён том: "+vol)
+	if strings.TrimSpace(result) == "" {
+		result = "Неиспользуемые тома не найдены"
 	}
 	CDInvalidateVolumesCache()
 	CDInvalidateContainersCache()
-	return fmt.Sprintf("Удалено неиспользуемых томов: %d\n%s", removedVol, strings.Join(results, "\n")), nil
+	return result, nil
 }
 
 // CleanUnusedNetworks удаляет все сети, которые не используются контейнерами
@@ -1193,32 +1150,35 @@ func CleanUnusedNetworks(ctx context.Context) (string, error) {
 	return fmt.Sprintf("Удалено неиспользуемых сетей: %d\n%s", removedNet, strings.Join(results, "\n")), nil
 }
 
-// CleanUntaggedImages удаляет все образы без тегов через gRPC
+// CleanUntaggedImages удаляет все образы без тегов через wsl.exe и nerdctl.
 func CleanUntaggedImages(ctx context.Context) (string, error) {
-	imgs, err := CDListImages()
+	out, err := RunWSLWithCancel(ctx, "nerdctl images --format '{{.ID}}\t{{.Repository}}\t{{.Tag}}' 2>&1")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("не удалось получить список образов через wsl.exe: %w", err)
 	}
 
-	var untagged []Image
-	for _, img := range imgs {
-		if img.Repository == "" || strings.HasPrefix(img.Repository, "sha256:") {
-			untagged = append(untagged, img)
+	var untaggedIDs []string
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Split(strings.TrimSpace(line), "\t")
+		if len(fields) < 3 || fields[0] == "" {
+			continue
+		}
+		if fields[1] == "<none>" || fields[2] == "<none>" {
+			untaggedIDs = append(untaggedIDs, fields[0])
 		}
 	}
 
-	if len(untagged) == 0 {
+	if len(untaggedIDs) == 0 {
 		return "Образы без тегов не найдены", nil
 	}
 
 	var removedImg int
 	var results []string
 
-	for _, img := range untagged {
-		err := CDRemoveImage(img.ID)
-		if err == nil {
+	for _, imageID := range untaggedIDs {
+		if _, err := RunWSLWithCancel(ctx, fmt.Sprintf("nerdctl rmi -f %s 2>&1", shellQuote(imageID))); err == nil {
 			removedImg++
-			results = append(results, "Удалён образ: "+img.ID)
+			results = append(results, "Удалён образ: "+imageID)
 		}
 	}
 
@@ -1227,7 +1187,7 @@ func CleanUntaggedImages(ctx context.Context) (string, error) {
 		ClearImageSizeCache()
 		return fmt.Sprintf("Удалено образов без тегов: %d\n%s", removedImg, strings.Join(results, "\n")), nil
 	}
-	return "", fmt.Errorf("не удалось удалить ни одного образа")
+	return "", fmt.Errorf("не удалось удалить ни одного образа через wsl.exe")
 }
 
 // Мониторинг ресурсов (через WSL procfs)
@@ -1609,6 +1569,12 @@ func CleanBuildkitCache(ctx context.Context) (string, error) {
 	// Проверяем, включена ли очистка
 	if ttl == 0 && maxSize == "" {
 		return "Очистка кэша BuildKit отключена в настройках", nil
+	}
+
+	if !CheckBuildkitd() {
+		return "⚠️ Кэш BuildKit не очищен\n\n"+
+			"Демон buildkitd не запущен или недоступен.\n"+
+			"Запустите buildkitd и повторите операцию.", nil
 	}
 
 	// ШАГ 1: Очистка кэша старше N часов

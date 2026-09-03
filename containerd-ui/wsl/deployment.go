@@ -530,7 +530,7 @@ func ensureACMEStorage(path string) error {
 }
 
 func ensureDeploymentNetwork(ctx context.Context) error {
-	const networkName = "soul-dialogue"
+	networkName := GetDeployNetwork()
 	command := fmt.Sprintf(
 		"nerdctl network inspect %s >/dev/null 2>&1 || nerdctl network create --driver bridge %s",
 		shellQuote(networkName),
@@ -543,7 +543,7 @@ func ensureDeploymentNetwork(ctx context.Context) error {
 }
 
 func validateProjectComposeNetworkFromText(text string) error {
-	const networkName = "soul-dialogue"
+	networkName := GetDeployNetwork()
 
 	// Это эвристическая проверка, а не полноценный YAML-парсер.
 	// Для этого достаточно стандартных сервисных блоков, но YAML-якоря/многострочные эквиваленты
@@ -551,7 +551,7 @@ func validateProjectComposeNetworkFromText(text string) error {
 	if !strings.Contains(text, networkName) {
 		return fmt.Errorf("Compose-файл проекта не подключён к сети %q. Добавьте сеть %q и подключите backend/frontend к ней, иначе Traefik/Cloudflare не смогут обращаться к сервисам по имени.", networkName, networkName)
 	}
-	if !strings.Contains(text, "external: true") || !strings.Contains(text, "name: soul-dialogue") {
+	if !strings.Contains(text, "external: true") || !strings.Contains(text, "name: "+networkName) {
 		return fmt.Errorf("Compose-файл проекта должен объявлять сеть %q как external: true с name: %q. В противном случае Traefik/Cloudflare не увидят сервисы в общей сети.", networkName, networkName)
 	}
 	if !strings.Contains(text, "- "+networkName) {
@@ -625,7 +625,8 @@ func renderTraefikCompose(acmeEmail string) (string, error) {
 	var rendered bytes.Buffer
 	if err := composeTemplate.Execute(&rendered, struct {
 		ACMEEmail string
-	}{ACMEEmail: acmeEmail}); err != nil {
+		Network   string
+	}{ACMEEmail: acmeEmail, Network: GetDeployNetwork()}); err != nil {
 		return "", err
 	}
 	return rendered.String(), nil
@@ -708,12 +709,12 @@ const traefikCompose = `services:
     volumes:
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/acme.json:/etc/traefik/acme.json
-    networks:
-      - soul-dialogue
+		networks:
+			- {{ .Network }}
 networks:
-  soul-dialogue:
+	{{ .Network }}:
     external: true
-    name: soul-dialogue
+		name: {{ .Network }}
 `
 
 // renderCloudflareConfig генерирует config.json для cloudflared
@@ -756,7 +757,9 @@ func renderCloudflareCompose() (string, error) {
 	}
 
 	var rendered bytes.Buffer
-	if err := composeTemplate.Execute(&rendered, struct{}{}); err != nil {
+	if err := composeTemplate.Execute(&rendered, struct {
+		Network string
+	}{Network: GetDeployNetwork()}); err != nil {
 		return "", err
 	}
 	return rendered.String(), nil
@@ -832,10 +835,10 @@ const cloudflareComposeTemplate = `services:
     volumes:
       - ./cloudflare/config.json:/etc/cloudflare/config.json:ro
       - ./cloudflare/credentials.json:/etc/cloudflare/credentials.json:ro
-    networks:
-      - soul-dialogue
+		networks:
+			- {{ .Network }}
 networks:
-  soul-dialogue:
+	{{ .Network }}:
     external: true
-    name: soul-dialogue
+		name: {{ .Network }}
 `

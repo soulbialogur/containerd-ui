@@ -381,7 +381,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 	topBar := container.NewBorder(
 		progressBar.Widget(),
 		nil, nil, nil,
-		container.NewHBox(
+		container.NewAdaptiveGrid(4,
 			makeBtn("Запустить", func() {
 				if selectedID != "" {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
@@ -728,7 +728,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 	refresh()
 
-	return container.NewBorder(topBar, nil, nil, nil, container.NewBorder(header, nil, nil, nil, containerList))
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, container.NewBorder(header, nil, nil, nil, containerList)))
 }
 
 // showErrorDialog показывает кастомный диалог с ошибкой, поддерживающий прокрутку, перенос и копирование текста

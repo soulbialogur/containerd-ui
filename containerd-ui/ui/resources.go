@@ -70,12 +70,12 @@ func BuildResourcesTab() fyne.CanvasObject {
 		},
 	)
 
-	table.SetColumnWidth(0, 90)
-	table.SetColumnWidth(1, 200)
-	table.SetColumnWidth(2, 90)
-	table.SetColumnWidth(3, 160)
-	table.SetColumnWidth(4, 160)
-	table.SetColumnWidth(5, 90)
+	table.SetColumnWidth(0, 55)
+	table.SetColumnWidth(1, 100)
+	table.SetColumnWidth(2, 55)
+	table.SetColumnWidth(3, 90)
+	table.SetColumnWidth(4, 90)
+	table.SetColumnWidth(5, 55)
 
 	// Обновление — объединённый batch-вызов WSL (исправление #1)
 	// Раньше: 3 отдельных вызова wsl.exe (GetHostResources + GetStats + GetSystemResources)
@@ -181,5 +181,5 @@ func BuildResourcesTab() fyne.CanvasObject {
 	// Первый запуск при открытии вкладки
 	refresh()
 
-	return topBar
+	return withResponsiveScroll(topBar)
 }

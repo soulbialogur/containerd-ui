@@ -67,6 +67,9 @@ type AppConfig struct {
 	// Режим экономии ресурсов UI
 	EconomyMode bool `json:"economy_mode"`
 
+	// Автоматическая остановка контейнерного демона после периода без активности (минуты)
+	IdleDaemonStopMinutes int `json:"idle_daemon_stop_minutes"`
+
 	// Настройки сборки образов
 	SquashLayers     bool   `json:"squash_layers"`
 	Compression      string `json:"compression"`       // "gzip", "zstd", "none"
@@ -113,15 +116,18 @@ type AppConfig struct {
 	// Прокси для деплоя на домен: "traefik" или "cloudflare"
 	DeploymentProxy string `json:"deployment_proxy"`
 
+	// Внешняя сеть для связи прокси и сервисов проекта
+	DeployNetwork string `json:"deploy_network"`
+
 	// Email для Let's Encrypt / ACME
 	DeployEmail string `json:"deploy_email"`
 
 	// Имена сервисов для деплоя (должны совпадать с именами в docker-compose.yml)
-	DeployServiceBackend string `json:"deploy_service_backend"`
+	DeployServiceBackend  string `json:"deploy_service_backend"`
 	DeployServiceFrontend string `json:"deploy_service_frontend"`
 
 	// Порты сервисов внутри docker-compose для маршрутизации через Traefik/Cloudflare
-	DeployServiceBackendPort int `json:"deploy_service_backend_port"`
+	DeployServiceBackendPort  int `json:"deploy_service_backend_port"`
 	DeployServiceFrontendPort int `json:"deploy_service_frontend_port"`
 }
 
@@ -143,6 +149,7 @@ func DefaultConfig() *AppConfig {
 		VolumesCacheTTL:               5,
 		AutoRefreshInterval:           3,
 		EconomyMode:                   false,
+		IdleDaemonStopMinutes:         2,
 		SquashLayers:                  false,
 		Compression:                   "zstd",
 		CompressionLevel:              6,
@@ -155,6 +162,7 @@ func DefaultConfig() *AppConfig {
 		BuildkitCacheTTL:              24,
 		BuildkitMaxSize:               "5g",
 		DeploymentProxy:               "traefik",
+		DeployNetwork:                 "soul-dialogue",
 		DeployEmail:                   "",
 		DeployServiceBackend:          "backend",
 		DeployServiceFrontend:         "frontend",
@@ -203,8 +211,14 @@ func LoadConfig() (*AppConfig, error) {
 	if config.WslCacheTTL == 0 {
 		config.WslCacheTTL = DefaultConfig().WslCacheTTL
 	}
+	if config.IdleDaemonStopMinutes <= 0 {
+		config.IdleDaemonStopMinutes = DefaultConfig().IdleDaemonStopMinutes
+	}
 	if config.ContainerOperationConcurrency <= 0 {
 		config.ContainerOperationConcurrency = DefaultConfig().ContainerOperationConcurrency
+	}
+	if config.DeployNetwork == "" {
+		config.DeployNetwork = DefaultConfig().DeployNetwork
 	}
 
 	return config, nil
@@ -718,6 +732,21 @@ func GetDeploymentProxy() string {
 	return "traefik"
 }
 
+// GetDeployNetwork возвращает имя внешней сети для деплоя.
+func GetDeployNetwork() string {
+	configCache.RLock()
+	if configCache.config != nil {
+		network := strings.TrimSpace(configCache.config.DeployNetwork)
+		configCache.RUnlock()
+		if network != "" {
+			return network
+		}
+		return DefaultConfig().DeployNetwork
+	}
+	configCache.RUnlock()
+	return DefaultConfig().DeployNetwork
+}
+
 // SetDeploymentProxy устанавливает прокси для деплоя и сохраняет
 func SetDeploymentProxy(proxy string) error {
 	config, err := LoadConfig()
@@ -809,6 +838,9 @@ func ApplyConfigToCaches(config *AppConfig) {
 
 	// Обновляем TTL кэша WSL
 	wslCacheTTL.Store(int64(config.WslCacheTTL))
+	if config.IdleDaemonStopMinutes > 0 {
+		SetIdleDaemonThresholdForRuntime(config.IdleDaemonStopMinutes)
+	}
 
 	if config.MaxWSLCacheSize > 0 || config.WSLCacheCleanupAt > 0 {
 		wslCache.Lock()
