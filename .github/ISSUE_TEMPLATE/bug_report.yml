@@ -1,0 +1,112 @@
+name: Bug report
+description: Report a bug in Containerd UI
+title: "[Bug]: "
+labels: ["bug"]
+assignees: [ ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+        Please provide as much detail as possible to help us resolve the issue quickly.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Briefly describe the problem you encountered.
+      placeholder: What went wrong? (e.g., "The UI crashes when I try to list containers")
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide a clear, step‑by‑step guide to reproduce the issue.
+      placeholder: |
+        1. Start Containerd UI with ...
+        2. Navigate to ...
+        3. Click on ...
+        4. Observe the error.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen instead?
+      placeholder: Describe what should have occurred.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Please paste any error messages, stack traces, or logs.
+      placeholder: Paste logs or describe the observed behavior.
+    validations:
+      required: true
+
+  - type: input
+    id: ui-version
+    attributes:
+      label: Containerd UI version
+      description: Which version of Containerd UI are you using?
+      placeholder: e.g., v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      description: What operating system are you running on?
+      placeholder: e.g., Windows 11, Ubuntu 22.04, macOS 13
+    validations:
+      required: true
+
+  - type: input
+    id: wsl
+    attributes:
+      label: WSL version (if applicable)
+      description: If you are using Windows with WSL, specify the WSL version.
+      placeholder: e.g., WSL 2
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version (if building from source)
+      description: If you built the UI from source, provide the Go version used.
+      placeholder: e.g., 1.20
+
+  - type: input
+    id: containerd
+    attributes:
+      label: Containerd / nerdctl version
+      description: Which version of containerd or nerdctl are you using?
+      placeholder: e.g., containerd 1.7.0, nerdctl 1.4.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add screenshots, configuration files, environment variables, or any other information that might help.
+      placeholder: Anything else we should know?
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre‑submission Checklist
+      description: Please confirm the following before submitting.
+      options:
+        - label: I have checked that a similar issue has not already been filed.
+          required: true
+        - label: I have included clear steps to reproduce and described the expected behavior.
+          required: true
+        - label: I have removed any secrets, tokens, and personal data from the logs and screenshots.
+          required: true
