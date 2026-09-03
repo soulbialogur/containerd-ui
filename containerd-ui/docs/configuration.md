@@ -1,23 +1,23 @@
-# Конфигурация
+# Configuration
 
-Приложение сохраняет настройки в `config.json`, который находится рядом с исполняемым файлом `containerd-ui.exe`.
+The application stores its settings in `config.json`, next to `containerd-ui.exe`.
 
-## Как устроен доступ к системе
+## How System Access Works
 
-Основная модель доступа описана в [concepts.md](concepts.md): gRPC API containerd — основной путь, а WSL + nerdctl — fallback. Здесь фокус смещён на фактические параметры конфигурации и их значения по умолчанию.
+The access model is described in [concepts.md](concepts.md): the containerd gRPC API is the primary path, and WSL + nerdctl is the fallback. This guide focuses on configuration fields and their defaults.
 
-## Основные параметры
+## Main Settings
 
-Согласно `DefaultConfig()` в `config.go`, значения по умолчанию для ключевых параметров следующие:
+According to `DefaultConfig()` in `config.go`, the key defaults are:
 
 - `compression` = `"zstd"`
 - `deployment_proxy` = `"traefik"`
 
-Пример файла:
+Example configuration file:
 
 ```json
 {
-  "project_path": "C:\\Users\\User\\OneDrive\\Рабочий стол\\project",
+  "project_path": "C:\\Users\\User\\OneDrive\\Desktop\\project",
   "wsl_distro": "Ubuntu-24.04",
   "cd_port": 50051,
   "cd_namespace": "default",
@@ -53,93 +53,93 @@
 }
 ```
 
-> В `config.json` также присутствуют поля совместимости и резервные значения, которые не являются активными настройками UI и могут быть оставлены в файле для обратной совместимости. Они описаны ниже в разделе «Резервные/устаревшие поля».
+> `config.json` may also contain compatibility and reserved fields. They are not active UI settings and can be left in place for backward compatibility. They are listed below under “Reserved / Legacy Fields”.
 
-## Полное описание полей
+## Complete Field Reference
 
-| Поле | Описание | Значение по умолчанию |
+| Field | Description | Default |
 |---|---|---:|
-| `project_path` | Путь к корню проекта с `compose.yaml` или `docker-compose.yml` | `""` |
-| `wsl_distro` | Имя WSL-дистрибутива, в котором запускаются Linux-команды | `Ubuntu-24.04` |
-| `cd_port` | Порт gRPC контейнерного runtime (`containerd`) | `50051` |
-| `cd_namespace` | Namespace для containerd API | `default` |
-| `scripts_path` | Подпапка со скриптами для контейнерных операций | `scripts/containerd` |
-| `db_volume_name` | Имя тома PostgreSQL, используемого в вкладке «База данных» | `""` |
-| `systemd_service` | Имя systemd-сервиса для контейнерной среды | `containerd` |
-| `nerdctl_path` | Путь к `nerdctl`; если пусто, используется PATH | `""` |
-| `log_tail` | Сколько строк логов показывать в интерфейсе | `100` |
-| `wsl_cache_ttl` | Время жизни кэша WSL-команд в секундах | `2` |
-| `containers_cache_ttl` | TTL кэша списка контейнеров в секундах | `3` |
-| `images_cache_ttl` | TTL кэша списка образов в секундах | `5` |
-| `volumes_cache_ttl` | TTL кэша списка томов в секундах | `5` |
-| `auto_refresh_interval` | Интервал автообновления в секундах | `3` |
-| `economy_mode` | Отключать фоновые обновления неактивных вкладок | `false` |
-| `squash_layers` | Объединять слои при сборке через `--squash` | `false` |
-| `compression` | Тип сжатия (`gzip`, `zstd`, `none`) | `zstd` |
-| `compression_level` | Уровень сжатия от 1 до 9 | `6` |
-| `max_wsl_cache_size` | Максимальный размер кэша WSL в байтах | `10485760` |
-| `wsl_cache_cleanup_at` | Порог очистки кэша по количеству записей | `25` |
-| `default_cpu_limit` | Лимит CPU для новых контейнеров, например `"0.5"`; применяется при создании новых контейнеров, в том числе при обновлении образа | `""` |
-| `default_memory_limit` | Лимит памяти для новых контейнеров, например `"512m"`; применяется при создании новых контейнеров, в том числе при обновлении образа | `""` |
-| `max_parallelism` | Максимум параллельных сборок; `0` = без ограничений | `0` |
-| `container_operation_concurrency` | Число одновременных операций запуска/остановки/удаления контейнеров. Значение читается через `GetContainerOperationConcurrency()` и используется в массовых действиях по контейнерам | `4` |
-| `buildkit_cache_ttl` | Очистка кэша BuildKit старше N часов; `0` отключает очистку | `24` |
-| `buildkit_max_size` | Максимальный размер кэша BuildKit, например `"5g"` | `"5g"` |
-| `deployment_proxy` | Выбранный прокси: `traefik` или `cloudflare` | `traefik` |
-| `deploy_email` | Email для Let's Encrypt / ACME, используется при выпуске сертификата | `""` |
-| `deploy_network` | Имя внешней сети для прокси и сервисов | `soul-dialogue` |
-| `deploy_service_backend` | Имя backend-сервиса в Compose | `backend` |
-| `deploy_service_frontend` | Имя frontend-сервиса в Compose | `frontend` |
-| `deploy_service_backend_port` | Внутренний порт backend внутри контейнера | `8000` |
-| `deploy_service_frontend_port` | Внутренний порт frontend внутри контейнера | `80` |
+| `project_path` | Path to the project root containing `compose.yaml` or `docker-compose.yml` | `""` |
+| `wsl_distro` | WSL distribution where Linux commands run | `Ubuntu-24.04` |
+| `cd_port` | gRPC port for the container runtime (`containerd`) | `50051` |
+| `cd_namespace` | Namespace for the containerd API | `default` |
+| `scripts_path` | Subdirectory containing container operation scripts | `scripts/containerd` |
+| `db_volume_name` | PostgreSQL volume name shown in the Database tab | `""` |
+| `systemd_service` | systemd service name for the container environment | `containerd` |
+| `nerdctl_path` | Path to `nerdctl`; if empty, `PATH` is used | `""` |
+| `log_tail` | Number of log lines shown in the UI | `100` |
+| `wsl_cache_ttl` | WSL command cache lifetime in seconds | `2` |
+| `containers_cache_ttl` | Container list cache TTL in seconds | `3` |
+| `images_cache_ttl` | Image list cache TTL in seconds | `5` |
+| `volumes_cache_ttl` | Volume list cache TTL in seconds | `5` |
+| `auto_refresh_interval` | Automatic refresh interval in seconds | `3` |
+| `economy_mode` | Disable background updates for inactive tabs | `false` |
+| `squash_layers` | Squash layers during builds with `--squash` | `false` |
+| `compression` | Compression type (`gzip`, `zstd`, `none`) | `zstd` |
+| `compression_level` | Compression level from 1 to 9 | `6` |
+| `max_wsl_cache_size` | Maximum WSL cache size in bytes | `10485760` |
+| `wsl_cache_cleanup_at` | Cache cleanup threshold by entry count | `25` |
+| `default_cpu_limit` | CPU limit for new containers, for example `"0.5"`; applies when creating containers, including image updates | `""` |
+| `default_memory_limit` | Memory limit for new containers, for example `"512m"`; applies when creating containers, including image updates | `""` |
+| `max_parallelism` | Maximum concurrent builds; `0` = unlimited | `0` |
+| `container_operation_concurrency` | Number of concurrent container start/stop/remove operations. Read through `GetContainerOperationConcurrency()` and used for bulk container actions | `4` |
+| `buildkit_cache_ttl` | Remove BuildKit cache entries older than N hours; `0` disables age-based cleanup | `24` |
+| `buildkit_max_size` | Maximum BuildKit cache size, for example `"5g"` | `"5g"` |
+| `deployment_proxy` | Selected proxy: `traefik` or `cloudflare` | `traefik` |
+| `deploy_email` | Email for Let's Encrypt / ACME certificate issuance | `""` |
+| `deploy_network` | External network name for the proxy and services | `soul-dialogue` |
+| `deploy_service_backend` | Backend service name in Compose | `backend` |
+| `deploy_service_frontend` | Frontend service name in Compose | `frontend` |
+| `deploy_service_backend_port` | Backend internal container port | `8000` |
+| `deploy_service_frontend_port` | Frontend internal container port | `80` |
 
-## Практические рекомендации по выбору значений
+## Practical Recommendations
 
-Для большинства пользователей достаточно значений по умолчанию, но некоторые параметры лучше подбирать под конкретную систему.
+The defaults work for most users, but some settings should be adjusted to match the system.
 
 ### `compression_level`
 
-- `1` — максимальная скорость, меньшая степень сжатия;
-- `6` — хороший баланс между скоростью и размерами образов;
-- `9` — максимальная плотность, но заметно медленнее.
+- `1` — fastest, with less compression;
+- `6` — a good balance between speed and image size;
+- `9` — maximum compression, but noticeably slower.
 
-Для обычной разработки `6` — разумный компромисс. Если вы собираете большие образы и хотите меньше места на диске, можно поднять до `7-9`. Если важнее скорость сборки и вы часто пересобираете проект — лучше оставить `3-5`.
+For everyday development, `6` is a sensible compromise. Use `7-9` for large images when disk space matters, or `3-5` when build speed matters most.
 
 ### `max_wsl_cache_size`
 
-Это ограничение на общий размер WSL-кэша в байтах. Значение по умолчанию `10485760` (10 МБ) маленькое для активной разработки. Если проект меняется часто и вы видите много повторных чтений, можно увеличить лимит до `50MB`, `100MB` или больше, но важно следить за тем, чтобы кэш не рос бесконтрольно.
+This is the total WSL cache size limit in bytes. The default `10485760` (10 MB) is small for active development. If the project changes frequently and you see many repeated reads, increase the limit to `50MB`, `100MB`, or more, while ensuring that the cache does not grow without bounds.
 
-Хорошая практика:
+Good guidelines:
 
-- небольшие проекты: `10MB`-`50MB`;
-- крупные проекты с большим числом образов/контейнеров: `100MB` и больше;
-- если WSL перегружен — уменьшить лимит и активнее очищать старые записи.
+- small projects: `10MB`-`50MB`;
+- large projects with many images or containers: `100MB` or more;
+- if WSL is under heavy load, reduce the limit and clean old entries more aggressively.
 
 ### `buildkit_cache_ttl`
 
-Используется для удаления старого BuildKit-кэша по возрасту, измеряемому в часах.
+This setting removes old BuildKit cache entries based on their age in hours.
 
-- `0` — отключить очистку по времени;
-- `24` — типично для регулярной утилизации;
-- более высокие значения подходят для стабильного окружения, где кэш часто переиспользуется.
+- `0` — disable age-based cleanup;
+- `24` — a typical value for regular cleanup;
+- higher values suit stable environments where the cache is reused frequently.
 
 ### `container_operation_concurrency`
 
-Если проект маленький, `4` — хорошее значение. Для мощных систем можно увеличить до `6-8`, но это повышает нагрузку на WSL/containerd и иногда приводит к скачкам по CPU и I/O.
+For a small project, `4` is a good value. On powerful systems, you can increase it to `6-8`, but this increases WSL/containerd load and may cause CPU and I/O spikes.
 
 ### `economy_mode`
 
-Этот флаг полезен, когда:
+This flag is useful when:
 
-- открыто много вкладок;
-- проект большой или WSL медленный;
-- активно используются контейнеры и фоновое обновление нагрузочно.
+- many tabs are open;
+- the project is large or WSL is slow;
+- containers are used heavily and background refresh is expensive.
 
-Если включён `economy_mode`, неактивные вкладки замораживают таймеры и фоновые запросы, поэтому UI становится более спокойным и менее шумным.
+When `economy_mode` is enabled, inactive tabs pause timers and background requests, making the UI quieter and reducing system activity.
 
-## Резервные / устаревшие поля
+## Reserved / Legacy Fields
 
-В файле `config.json` могут встречаться поля, которые присутствуют в модели конфигурации только для обратной совместимости. Они не используются в текущем UI и не являются пользовательскими настройками, которые нужно редактировать вручную в обычной работе:
+`config.json` may contain fields kept only for backward compatibility. They are not used by the current UI and normally should not be edited manually:
 
 - `cache_container`
 - `cache_image`
@@ -154,87 +154,87 @@
 - `retry_multiplier`
 - `retry_max_attempts`
 
-Эти значения обычно используются как внутренние параметры кэширования и повторных попыток, но в текущей пользовательской настройке их можно считать зарезервированными или legacy-полями. Они не используются в UI, и их можно не трогать: основной рабочий набор параметров находится в основном блоке конфигурации и описан выше.
+These values are generally internal cache and retry parameters. In the current user configuration, treat them as reserved or legacy fields. They are not used by the UI and can be left unchanged; the active settings are described in the main configuration section above.
 
-## Как менять настройки
+## Change Settings
 
-Все параметры можно менять через вкладку “Настройки” в приложении:
+All settings can be changed from the Settings tab:
 
-- указать путь к проекту;
-- выбрать WSL-дистрибутив;
-- изменить gRPC-порт и namespace;
-- настроить прокси и domain-параметры;
-- задать email для Let's Encrypt;
-- настроить сервисы, внутренние порты и лимиты; 
-- включить/отключить режим экономии ресурсов.
+- set the project path;
+- choose the WSL distribution;
+- change the gRPC port and namespace;
+- configure the proxy and domain settings;
+- set the Let's Encrypt email;
+- configure services, internal ports, and limits;
+- enable or disable resource-saving mode.
 
-## После ручного изменения `config.json`
+## After Editing `config.json` Manually
 
-Если файл изменён вручную, приложение нужно перезапустить. После запуска оно перечитывает `config.json` и применяет новые значения.
+Restart the application after editing the file manually. It rereads `config.json` on startup and applies the new values.
 
-## Кэш и автоматическая инвалидизация
+## Cache and Automatic Invalidation
 
-Кэши WSL и containerd обновляются автоматически. При изменении состояния данных (контейнеры, образы, тома, сети) связанные кэшированные результаты инвалидируются и перечитываются при следующем обновлении интерфейса.
+WSL and containerd caches are updated automatically. When the state of containers, images, volumes, or networks changes, related cached results are invalidated and reread during the next UI refresh.
 
-Это позволяет избежать устаревших данных при сборке, запуске, остановке или очистке контейнеров. Инвалидация происходит не только по TTL, но и по событиям: при создании, удалении и изменении контейнеров, образов, томов и сетей `CacheManager` помечает кэш как устаревший и запускает повторное чтение данных на следующем обновлении.
+This prevents stale data during container builds, starts, stops, and cleanup. Invalidation is event-driven as well as TTL-based: when containers, images, volumes, or networks are created, removed, or changed, `CacheManager` marks the cache stale and triggers a fresh read on the next refresh.
 
-### Кэширование WSL и метрики (`CacheManager`)
+### WSL Caching and Metrics (`CacheManager`)
 
-`CacheManager` — это глобальный диспетчер кэша. Он хранит:
+`CacheManager` is the global cache manager. It stores:
 
-- события инвалидации `CacheEvent` и их типы (`CacheEventContainers`, `CacheEventImages`, `CacheEventVolumes`, `CacheEventStats`);
-- подписчиков, которые реагируют на актуальные события и обновляют состояние интерфейса;
-- показатели производительности: `hits`, `misses`, `errors` и итоговый `hitRate`.
+- `CacheEvent` invalidation events and their types (`CacheEventContainers`, `CacheEventImages`, `CacheEventVolumes`, `CacheEventStats`);
+- subscribers that react to events and update the UI state;
+- performance metrics: `hits`, `misses`, `errors`, and the resulting `hitRate`.
 
-События публикуются после изменений состояния данных, после чего `Invalidate()` вызывает соответствующие методы очистки кэша, например `CDInvalidateContainersCache()`, `CDInvalidateImagesCache()` и т. п. Такой подход позволяет централизованно управлять кэшем и снижает риск устаревших данных после массовых операций и очистки окружения.
+Events are published after state changes, after which `Invalidate()` calls the matching cache cleanup methods, such as `CDInvalidateContainersCache()` and `CDInvalidateImagesCache()`. This centralizes cache management and reduces stale data after bulk operations and environment cleanup.
 
-Приложение также собирает метрики кэша: попадания, промахи и статистику по использованию. Эти показатели полезны для диагностики производительности и позволяют понять, когда кеш реально ускоряет работу, а когда частая очистка и перечитывание начинают снижать эффективность интерфейса.
+The application also collects cache metrics: hits, misses, and usage statistics. These metrics help diagnose performance and show when caching speeds up the UI versus when frequent cleanup and rereading reduce its benefits.
 
-## Кэширование WSL-команд
+## WSL Command Caching
 
-Приложение кеширует результаты WSL-команд, чтобы уменьшить число повторных обращений к Linux-окружению. Для этого используются:
+The application caches WSL command results to reduce repeated calls to the Linux environment. It uses:
 
-- `wsl_cache_ttl` — время жизни кэша в секундах;
-- `max_wsl_cache_size` — максимальный размер кэша в байтах;
-- `wsl_cache_cleanup_at` — порог очистки старых записей по количеству элементов.
+- `wsl_cache_ttl` — cache lifetime in seconds;
+- `max_wsl_cache_size` — maximum cache size in bytes;
+- `wsl_cache_cleanup_at` — entry-count threshold for cleaning old records.
 
-### Кэш, экономия ресурсов и прогресс
+### Caching, Resource Saving, and Progress
 
-Основные механики описаны в [concepts.md](concepts.md). Здесь остаются только параметры, которые пользователь настраивает и видит в интерфейсе:
+The main mechanisms are described in [concepts.md](concepts.md). This section lists only the settings users can configure and see in the UI:
 
-- `wsl_cache_ttl`, `max_wsl_cache_size`, `wsl_cache_cleanup_at` — настройка WSL-кэша;
-- `economy_mode` и `auto_refresh_interval` — режим экономии ресурсов;
-- `buildkit_cache_ttl`, `buildkit_max_size` — очистка BuildKit;
-- `container_operation_concurrency` — ограничение параллельных контейнерных операций;
-- `max_parallelism` — ограничение параллельных сборок.
+- `wsl_cache_ttl`, `max_wsl_cache_size`, `wsl_cache_cleanup_at` — WSL cache settings;
+- `economy_mode` and `auto_refresh_interval` — resource-saving behavior;
+- `buildkit_cache_ttl`, `buildkit_max_size` — BuildKit cleanup;
+- `container_operation_concurrency` — concurrent container operation limit;
+- `max_parallelism` — concurrent build limit.
 
-Подробное поведение и сценарии работы описаны в [concepts.md](concepts.md) и в [quickstart.md](quickstart.md).
+Detailed behavior and usage scenarios are described in [concepts.md](concepts.md) and [quickstart.md](quickstart.md).
 
-## Важные правила
+## Important Rules
 
-- `project_path` должен вести в корень проекта, а не в файл compose;
-- для Traefik нужны свободные порты `80` и `443`;
-- `deploy_service_backend_port` и `deploy_service_frontend_port` должны совпадать с фактическими внутренними портами контейнеров;
-- `deployment_proxy` должно быть `traefik` или `cloudflare`;
-- `deploy_email` лучше задавать реальный рабочий email;
-- для деплоя проект должен содержать внешнюю сеть с именем из `deploy_network`; требования к ней описаны в [project-requirements.md](project-requirements.md).
+- `project_path` must point to the project root, not to the Compose file;
+- Traefik requires ports `80` and `443` to be available;
+- `deploy_service_backend_port` and `deploy_service_frontend_port` must match the containers' actual internal ports;
+- `deployment_proxy` must be `traefik` or `cloudflare`;
+- `deploy_email` should be a real, working email address;
+- the project must contain an external network named by `deploy_network`; see [project-requirements.md](project-requirements.md) for its requirements.
 
-## Что происходит, если поля пустые
+## When Fields Are Empty
 
-Если значения не заданы, приложение использует defaults:
+When values are not set, the application uses these defaults:
 
 - `wsl_distro = Ubuntu-24.04`
 - `deployment_proxy = traefik`
-- `deploy_network = soul-dialogue` (для старых конфигураций; рекомендуется задать имя сети проекта явно)
+- `deploy_network = soul-dialogue` (for older configurations; explicitly setting the project network name is recommended)
 - `deploy_service_backend = backend`
 - `deploy_service_frontend = frontend`
 - `deploy_service_backend_port = 8000`
 - `deploy_service_frontend_port = 80`
 
-## Где смотреть изменения
+## Checking Changes
 
-После сохранения параметров приложение читает обновлённый `config.json` при следующем запуске или после обновления состояния.
+After saving the settings, the application reads the updated `config.json` on the next startup or state refresh.
 
-Если нужно быстро изменить файл вручную, откройте его рядом с бинарником и отредактируйте JSON.
+To make a quick manual change, open the file next to the binary and edit the JSON.
 
-Подробнее про деплой — в [Деплой на домен](deployment.md).
+For deployment details, see [Domain Deployment](deployment.md).

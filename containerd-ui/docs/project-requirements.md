@@ -1,10 +1,10 @@
-# Требования к проекту
+# Project Requirements
 
-Для корректной сборки и деплоя проект должен соответствовать базовым требованиям. Имена сервисов, сети и порты не фиксированы приложением: укажите фактические значения в настройках и в `config.json`.
+For builds and deployments to work correctly, the project must meet a few basic requirements. The application does not hard-code service names, networks, or ports: enter the actual values in the settings and in `config.json`.
 
-## 1. Compose-файл
+## 1. Compose File
 
-В корне проекта должен быть файл `compose.yaml` или `docker-compose.yml`.
+The project root must contain a `compose.yaml` or `docker-compose.yml` file.
 
 ```text
 project/
@@ -14,13 +14,13 @@ project/
 └── ...
 ```
 
-Правильный корень проекта — это папка, в которой лежит compose-файл, а не отдельный сервис.
+The project root is the directory containing the Compose file, not an individual service directory.
 
-## 2. Внешняя сеть для прокси и сервисов
+## 2. External Network for the Proxy and Services
 
-Приложение использует имя внешней сети из настройки `deploy_network` в `config.json`.
-По умолчанию для совместимости используется `soul-dialogue`, но для любого другого проекта имя можно изменить во вкладке
-«Настройки» или вручную в конфигурации:
+The application uses the external network name from the `deploy_network` setting in `config.json`.
+For compatibility, the default is `soul-dialogue`, but you can change it for another project from the
+Settings tab or directly in the configuration:
 
 ```json
 {
@@ -28,7 +28,7 @@ project/
 }
 ```
 
-В Compose эта сеть должна быть объявлена внешней. Универсальный пример:
+The network must be declared as external in Compose. A generic example:
 
 ```yaml
 networks:
@@ -37,7 +37,7 @@ networks:
     name: my-project-network
 ```
 
-Сервисы должны быть подключены к этой сети:
+Services must be attached to this network:
 
 ```yaml
 services:
@@ -50,36 +50,36 @@ services:
       - my-project-network
 ```
 
-Замените `my-project-network` на значение `deploy_network` и перечислите нужные сервисы.
-Если сеть отсутствует или объявлена как обычная, а не внешняя, деплой и маршрутизация будут работать некорректно.
+Replace `my-project-network` with the value of `deploy_network` and list the services that need access to it.
+If the network is missing or declared as a regular rather than an external network, deployment and routing will not work correctly.
 
-## 3. Backend и frontend
+## 3. Backend and Frontend
 
-Для деплоя нужно, чтобы проект имел корректно настроенные сервисы, указанные в `deploy_service_backend` и `deploy_service_frontend`, а также внутренние порты, с которыми приложение будет работать.
+For deployment, the project must define the services named by `deploy_service_backend` and `deploy_service_frontend`, along with the internal ports the application should use.
 
-Типичные параметры:
+Typical values:
 
-- backend service name: `backend` (пример)
-- frontend service name: `frontend` (пример)
-- backend port: `8000` (пример)
-- frontend port: `80` (пример)
+- backend service name: `backend` (example)
+- frontend service name: `frontend` (example)
+- backend port: `8000` (example)
+- frontend port: `80` (example)
 
-Эти значения сравниваются с настройками в `config.json`.
+These values are compared with the settings in `config.json`.
 
-## 4. DNS и домен
+## 4. DNS and Domain
 
-Для публикации на домен DNS должен указывать на целевой сервер, а домен должен быть корректно настроен в выбранном proxy-режиме.
+For domain publishing, DNS must point to the target server, and the domain must be configured correctly for the selected proxy mode.
 
-## 5. Когда использовать этот документ
+## 5. When to Use This Document
 
-Используйте этот раздел, если:
+Use this guide when you need to:
 
-- проверяете проект перед сборкой;
-- готовите compose-файл для деплоя;
-- убеждаетесь, что выбранная в `deploy_network` сеть объявлена корректно;
-- проверяете названия сервисов и их внутренние порты.
+- checking the project before a build;
+- preparing a Compose file for deployment;
+- confirming that the network selected in `deploy_network` is declared correctly;
+- checking service names and their internal ports.
 
-См. также:
+See also:
 
 - [quickstart.md](quickstart.md)
 - [deployment.md](deployment.md)

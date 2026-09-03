@@ -1,116 +1,116 @@
-# Работа с образами и обновление приложения
+# Working with Images and Updating the Application
 
-Этот раздел описывает, как отдельно от проекта управлять образами, собирать и обновлять приложение, а также какие требования к железу и лицензированию нужно учитывать.
+This guide explains how to manage images independently of the project, build and update the application, and account for hardware and licensing requirements.
 
-## 1. Работа с образами
+## 1. Working with Images
 
-### Обзор
+### Overview
 
-Образы в этом проекте создаются через `nerdctl build` и могут быть собраны как:
+Images in this project are built with `nerdctl build` and can be created for:
 
-- для локального запуска проекта;
-- для отдельного сервиса (`backend`, `frontend`, `postgres`);
-- для переиспользования в другом окружении или под другим тегом.
+- local project runs;
+- an individual service (`backend`, `frontend`, `postgres`);
+- reuse in another environment or under a different tag.
 
-Основной сценарий сборки проекта описан в [quickstart.md](quickstart.md) и [deployment.md](deployment.md). Здесь — практика работы с образами как отдельным объектом.
+The main project build flow is described in [quickstart.md](quickstart.md) and [deployment.md](deployment.md). This page focuses on images as independent artifacts.
 
-### Основные команды
+### Common Commands
 
-Список образов:
+List images:
 
 ```bash
 nerdctl images
 ```
 
-Сборка отдельного образа:
+Build an individual image:
 
 ```bash
 cd /path/to/project
 nerdctl build --progress=plain --tag my-project/backend:latest --file backend/Dockerfile ./backend
 ```
 
-Сборка с переопределением имени и тега:
+Build with a custom name and tag:
 
 ```bash
 nerdctl build --progress=plain --tag my-registry/my-project/backend:v1.2.0 --file backend/Dockerfile ./backend
 ```
 
-Проверка, что образ собран и виден в локальном реестре:
+Verify that the image was built and is visible locally:
 
 ```bash
 nerdctl image inspect my-project/backend:latest
 ```
 
-Удаление образа:
+Remove an image:
 
 ```bash
 nerdctl rmi my-project/backend:latest
 ```
 
-Удаление образов без тега:
+Remove untagged images:
 
 ```bash
 nerdctl images -q | xargs -r nerdctl rmi
 ```
 
-> Важно: если образ используется контейнером, удаление может завершиться с ошибкой. Сначала остановите контейнер или удалите его экземпляр.
+> Important: removing an image that is used by a container may fail. Stop the container or remove its instance first.
 
-### Политика тегирования
+### Tagging Policy
 
-Для локальной разработки удобно использовать теги вида:
+For local development, tags like these are convenient:
 
 - `my-project/backend:latest`
 - `my-project/frontend:latest`
 - `my-project/postgres:latest`
 
-Для версии релиза лучше использовать:
+For a release, use versioned tags:
 
 - `my-project/backend:v1.2.0`
 - `my-project/frontend:v1.2.0`
 - `my-project/postgres:v1.2.0`
 
-Так проще:
+This makes it easier to:
 
-- различать локальную сборку и релиз;
-- откатываться на более раннюю сборку;
-- понимать, какая версия реально запущена.
+- distinguish local builds from releases;
+- roll back to an earlier build;
+- identify the version that is actually running.
 
-### Очистка образов и кэша
+### Clean Up Images and Cache
 
-Для локальной уборки можно использовать:
+For local cleanup, use:
 
 ```bash
 nerdctl image prune
 nerdctl builder prune
 ```
 
-Если нужно очистить BuildKit по лимиту и TTL, используйте настройки из [configuration.md](configuration.md) и функциональность UI в разделе “Очистка”.
+To clean BuildKit according to size and TTL limits, use the settings in [configuration.md](configuration.md) and the Cleanup section of the UI.
 
-## 2. Обновление самого приложения
+## 2. Update the Application
 
-### Простая схема обновления
+### Basic Update Flow
 
-Обновление приложения обычно состоит из четырёх шагов:
+Updating the application usually involves four steps:
 
-1. сохранить текущую конфигурацию;
-2. обновить исходники;
-3. пересобрать бинарник UI и/или контейнеры;
-4. проверить окружение и запустить проект снова.
+1. back up the current configuration;
+2. update the source code;
+3. rebuild the UI binary and/or containers;
+4. verify the environment and start the project again.
 
-### Рекомендуемый сценарий
+### Recommended Flow
 
 ```bash
 git pull --rebase
 ```
 
-Затем пересоберите UI:
+Then rebuild the UI:
 
 ```bash
 cd containerd-ui
 bash build.sh
 ```
 
-Если меняется только проектный стек и контейнеры:
+If only the project stack and containers have changed:
 
 ```bash
 cd /path/to/project
@@ -118,70 +118,70 @@ nerdctl compose build
 nerdctl compose up -d --force-recreate
 ```
 
-Если вы меняете только код backend/frontend и образ уже собран:
+If only the backend/frontend code changed and the image has already been built:
 
 ```bash
 nerdctl compose up -d --build
 ```
 
-### Что важно сохранить перед обновлением
+### What to Back Up Before Updating
 
-Перед обновлением стоит сохранить:
+Before updating, back up:
 
-- `config.json` рядом с `containerd-ui.exe`;
-- `.containerd-data/` с прокси-конфигами и ACME-данными;
-- значения доменов, токенов и email для Let's Encrypt/Cloudflare;
-- файлы с секретами и `.env`-настройками при необходимости.
+- `config.json` next to `containerd-ui.exe`;
+- `.containerd-data/` with proxy configuration and ACME data;
+- domain, token, and Let's Encrypt/Cloudflare email values;
+- secret files and `.env` settings, if applicable.
 
-### Проверка после обновления
+### Verify After Updating
 
-После обновления обязательно проверьте:
+After updating, verify that:
 
-- WSL и containerd всё ещё доступны;
-- BuildKit запущен;
-- проект собирается и запускается без ошибок;
-- DNS и порты `80/443` не конфликтуют;
-- внешняя сеть из `deploy_network` существует и привязана корректно.
+- WSL and containerd are still available;
+- BuildKit is running;
+- the project builds and starts without errors;
+- DNS and ports `80/443` have no conflicts;
+- the external network from `deploy_network` exists and is attached correctly.
 
-Полный набор проверок есть в [diagnostics.md](diagnostics.md).
+The complete set of checks is available in [diagnostics.md](diagnostics.md).
 
-## 3. Требования к железу
+## 3. Hardware Requirements
 
-### Рекомендуемая рабочая среда
+### Recommended Environment
 
-Для нормальной работы контейнерного интерфейса и WSL2 рекомендуется:
+For reliable operation of the container UI and WSL2, we recommend:
 
-- Windows 11 или современная версия Windows 10;
-- 8 ГБ ОЗУ минимум, 16 ГБ предпочтительно;
-- SSD-диск с достаточным свободным местом;
-- 4+ логических ядра процессора;
-- стабильный доступ к сети для загрузки образов и сертификатов.
+- Windows 11 or a current version of Windows 10;
+- at least 8 GB of RAM, with 16 GB preferred;
+- an SSD with sufficient free space;
+- 4 or more logical CPU cores;
+- a stable network connection for downloading images and certificates.
 
-### Что особенно важно
+### What Matters Most
 
-- RAM: при активной сборке образов или работе с несколькими контейнерами запас памяти критичен;
-- SSD: ускоряет сборку и чтение образов;
-- свободное место на диске: BuildKit и Docker/nerdctl-кэш могут быстро накапливаться;
-- сеть: особенно важно для Cloudflare Tunnel и Let's Encrypt.
+- RAM: headroom is important during active image builds or when running several containers;
+- SSD: speeds up builds and image reads;
+- free disk space: BuildKit and Docker/nerdctl caches can grow quickly;
+- network access: especially important for Cloudflare Tunnel and Let's Encrypt.
 
-### Если железо ограниченное
+### On Resource-Constrained Machines
 
-На слабых машинах стоит:
+On less powerful machines:
 
-- уменьшить `container_operation_concurrency`;
-- уменьшить `max_parallelism`;
-- включить `economy_mode`;
-- держать `buildkit_cache_ttl` и размеры кэша под контролем.
+- reduce `container_operation_concurrency`;
+- reduce `max_parallelism`;
+- enable `economy_mode`;
+- keep `buildkit_cache_ttl` and cache sizes under control.
 
-Подбор параметров описан в [configuration.md](configuration.md).
+Parameter selection is described in [configuration.md](configuration.md).
 
-## 4. Лицензирование
+## 4. Licensing
 
-Проект доступен по GNU Affero General Public License v3 либо по отдельной коммерческой лицензии на основании письменного соглашения с правообладателем. AGPLv3 не запрещает коммерческое использование, но требует соблюдать её условия при распространении и предоставлении функциональности через сеть. Условия AGPLv3 не изменяются коммерческим вариантом лицензирования.
+The project is available under the GNU Affero General Public License v3 or under a separate commercial license based on a written agreement with the rights holder. AGPLv3 does not prohibit commercial use, but its terms must be followed when software is distributed or functionality is provided over a network. The commercial option does not alter the terms of AGPLv3.
 
-Также следует учитывать отдельные лицензии сторонних компонентов, библиотек, контейнерных образов и утилит, которые используются в проекте или в среде WSL.
+You must also account for the separate licenses of third-party components, libraries, container images, and utilities used by the project or the WSL environment.
 
-## 5. Полезные ссылки
+## 5. Further Reading
 
 - [quickstart.md](quickstart.md)
 - [installation.md](installation.md)

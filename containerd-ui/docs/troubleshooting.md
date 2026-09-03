@@ -1,121 +1,121 @@
-# Решение проблем
+# Troubleshooting
 
-## Общая модель доступа
+## Access Model
 
-Полная архитектура доступа к среде описана в [concepts.md](concepts.md). Для проверки окружения и команд используйте [diagnostics.md](diagnostics.md).
+The complete access architecture is described in [concepts.md](concepts.md). Use [diagnostics.md](diagnostics.md) for environment checks and commands.
 
-## WSL не найден
+## WSL Is Not Found
 
-Проверки WSL и списка дистрибутивов собраны в [diagnostics.md](diagnostics.md). Если дистрибутива нет, установите его по инструкции из этого же раздела.
+WSL and distribution checks are collected in [diagnostics.md](diagnostics.md). If the distribution is missing, install it using the instructions there.
 
-## containerd или nerdctl не работают
+## containerd or nerdctl Is Not Working
 
-Полные команды проверки `containerd`, `nerdctl`, сервисов и окружения собраны в [diagnostics.md](diagnostics.md). После базовой проверки переходите к логам и статусу конкретного сервиса.
+The complete set of checks for `containerd`, `nerdctl`, services, and the environment is in [diagnostics.md](diagnostics.md). After the basic checks, review the status and logs of the affected service.
 
-## BuildKit не запускается
+## BuildKit Will Not Start
 
-Сначала проверьте установку и базовый сценарий в [installation.md](installation.md). Для полного набора команд запуска и диагностики используйте [diagnostics.md](diagnostics.md); там же собраны варианты ручного старта и проверки службы.
+First verify the installation using [installation.md](installation.md). For startup and diagnostic commands, see [diagnostics.md](diagnostics.md), which also includes manual startup options and service checks.
 
-Если сервис всё равно не отвечает, проверьте логи:
+If the service still does not respond, check the logs:
 
 ```bash
 sudo journalctl -u buildkit -n 100 --no-pager
 ```
 
-## Не удалось подключиться к containerd
+## Cannot Connect to containerd
 
-Проверьте, что `containerd` запущен и доступен внутри WSL:
+Make sure `containerd` is running and available inside WSL:
 
 ```bash
 wsl -d Ubuntu-24.04 -- systemctl status containerd
 wsl -d Ubuntu-24.04 -- ss -lnt | grep 50051
 ```
 
-Если порт не открыт, проверьте, не блокирует ли его брандмауэр или iptables. В большинстве случаев проблема решается запуском контейнерного runtime и повторной проверкой `nerdctl info`.
+If the port is not open, check whether it is blocked by a firewall or iptables. In most cases, starting the container runtime and running `nerdctl info` again resolves the issue.
 
-## Порты 80/443 заняты
+## Ports 80/443 Are in Use
 
-Подробная логика проверки и объяснение конфликтов между Windows и WSL описаны в [deployment.md](deployment.md). Для быстрой диагностики используйте команды из [diagnostics.md](diagnostics.md), затем освободите процесс, который удерживает порт.
+The port-checking logic and Windows/WSL conflict details are described in [deployment.md](deployment.md). For a quick diagnosis, use the commands in [diagnostics.md](diagnostics.md), then stop the process holding the port.
 
 ## Cloudflare token invalid
 
-Проверка токена и credentials-файла выполняется в [deployment.md](deployment.md). Там описаны шаги для Cloudflare Dashboard и команда:
+Token and credential-file validation is described in [deployment.md](deployment.md), including the Cloudflare Dashboard steps and this command:
 
 ```bash
 cloudflared tunnel list --credentials-file /path/to/credentials.json
 ```
 
-Если команда падает с ошибкой, обновите токен через Cloudflare Dashboard и сохраните его заново в приложении. Также стоит проверить, что `cloudflared` установлен и доступен в PATH.
+If the command fails, refresh the token in the Cloudflare Dashboard and save it in the application again. Also verify that `cloudflared` is installed and available in `PATH`.
 
-## Ошибка внешней сети проекта
+## Project External Network Error
 
-Если сеть из `deploy_network` не найдена, сначала проверьте [project-requirements.md](project-requirements.md): там описаны правильный `external`-блок, подключение сервисов и корень проекта. Если сеть нужно создать локально, можно использовать команду:
+If the network from `deploy_network` is not found, first check [project-requirements.md](project-requirements.md), which explains the correct `external` block, service connections, and project root. To create the network locally, use:
 
 ```bash
 nerdctl network create --driver bridge my-project-network
 ```
 
-Но в compose-файле всё равно нужно оставить правильное объявление внешней сети и заменить `my-project-network` на значение `deploy_network`, иначе деплой и маршрутизация будут работать некорректно.
+The Compose file must still declare the network correctly as external. Replace `my-project-network` with the value of `deploy_network`; otherwise deployment and routing will fail.
 
-## Compose-файл не содержит настроенную внешнюю сеть
+## The Compose File Has No Configured External Network
 
-Схема и пример правильного объявления находятся в [project-requirements.md](project-requirements.md). Там же показано, как подключать настроенные сервисы к сети из `deploy_network`.
+The correct declaration and an example are in [project-requirements.md](project-requirements.md), which also shows how to attach services to `deploy_network`.
 
-## Путь к проекту содержит пробелы или кириллицу
+## The Project Path Contains Spaces or Non-Latin Characters
 
-Код поддерживает такие пути, но убедитесь, что WSL корректно монтирует директорию. Обычно Windows-папки выглядят так:
+The application supports these paths, but make sure WSL mounts the directory correctly. A typical Windows path looks like this:
 
 ```bash
-/mnt/c/Users/User/OneDrive/Рабочий\ стол/project
+/mnt/c/Users/User/OneDrive/Desktop/project
 ```
 
-Если приложение не видит проект, проверьте, что путь в настройках соответствует реальному WSL-формату и что папка смонтирована без ошибок.
+If the application cannot see the project, verify that the configured path uses the actual WSL format and that the directory was mounted correctly.
 
-## Кэш WSL переполнен
+## The WSL Cache Is Full
 
-Проверьте настройки кэша:
+Check these cache settings:
 
 - `max_wsl_cache_size`
 - `wsl_cache_cleanup_at`
 
-Можно очистить кэш вручную через кнопку **«Очистить кэш»** в приложении или увеличить лимит в `config.json`. Если полезно, можно удалить старые WSL-данные и перечитать состояние заново, после чего приложение начнёт собирать свежий кэш.
+You can clear the cache with the **Clear Cache** button or increase the limit in `config.json`. You can also remove old WSL data and refresh the state so the application builds a new cache.
 
-Если кэш быстро переполняется, стоит увеличить `max_wsl_cache_size` и скорректировать `wsl_cache_cleanup_at` в зависимости от размера проекта. Важно: эти значения применяются динамически, поэтому разрешения на очистку и лимиты используются на следующем проходе кэш-очистки без ручного пересоздания всего окружения.
+If the cache fills up quickly, increase `max_wsl_cache_size` and adjust `wsl_cache_cleanup_at` to match the project size. These settings are applied dynamically during the next cleanup pass; the environment does not need to be recreated.
 
-## Прогресс-бар не обновляется
+## The Progress Bar Does Not Update
 
-Часто это связано с тем, что вкладка неактивна или включён режим `economy_mode`. В этом режиме обновления для неактивных вкладок приостанавливаются, поэтому UI может выглядеть «зависшим», хотя фоновые операции продолжают выполняться. Проверьте, что вкладка активна, и временно отключите `economy_mode` для диагностики.
+This is often caused by an inactive tab or enabled `economy_mode`. In this mode, inactive tabs pause updates, so the UI may look stuck while background operations continue. Make the tab active and temporarily disable `economy_mode` to diagnose the issue.
 
-Если автообновление работает только на активной вкладке, а на фоне состояние выглядит «застывшим», проверьте настройку `economy_mode` и `auto_refresh_interval`. Для диагностики удобно временно отключить экономный режим, чтобы увидеть, обновляются ли данные в нормальном режиме и не является ли проблема только в приостановке фона для неактивных панелей.
+If automatic refresh works only on the active tab, check `economy_mode` and `auto_refresh_interval`. Temporarily disabling economy mode will show whether the issue is simply background updates being paused for inactive panels.
 
-## Операция зависла
+## An Operation Is Stuck
 
-Если операция долго не завершается, стоит нажать **«Отмена»**. Отмена работает кооперативно: приложение не прерывает процесс жёстко, а просит операцию завершиться в безопасной точке через `cancelCh`. Поэтому иногда отмена занимает несколько секунд, особенно если вызов уже находится в середине длинной команды или ожидания ответа от WSL/containerd.
+If an operation does not finish, click **Cancel**. Cancellation is cooperative: the application asks the operation to stop at a safe point through `cancelCh` rather than forcibly interrupting it. This can take a few seconds if a long command or WSL/containerd response is already in progress.
 
-## Приложение не видит проект
+## The Application Cannot See the Project
 
-Проверьте, что `project_path` указывает на корень проекта, а не на файл `compose.yaml`.
+Make sure `project_path` points to the project root rather than the `compose.yaml` file.
 
-## Порты 80/443 заняты
+## Ports 80/443 Are in Use
 
-Подробное объяснение и сценарий проверки описаны в [deployment.md](deployment.md). Для быстрой проверки используйте команду из [diagnostics.md](diagnostics.md), а затем освободите конфликтующий процесс или остановите сервис, который слушает порты 80/443.
+The explanation and verification procedure are in [deployment.md](deployment.md). For a quick check, use the command from [diagnostics.md](diagnostics.md), then stop the conflicting process or service listening on ports 80/443.
 
-## Traefik не запускается
+## Traefik Will Not Start
 
-Для полного сценария проверки деплоя см. [deployment.md](deployment.md) и [diagnostics.md](diagnostics.md). Важно проверить DNS, сеть из `deploy_network`, email ACME и доступность портов 80/443.
+For the complete deployment checklist, see [deployment.md](deployment.md) and [diagnostics.md](diagnostics.md). Check DNS, the `deploy_network`, the ACME email, and ports 80/443.
 
-## Cloudflare Tunnel не работает
+## Cloudflare Tunnel Does Not Work
 
-Проверка токена и credentials выполняется в [deployment.md](deployment.md). Базовый контроль CLI доступен через:
+Token and credential validation is described in [deployment.md](deployment.md). Basic CLI checks:
 
 ```bash
 cloudflared --version
 cloudflared tunnel list --credentials-file /path/to/credentials.json
 ```
 
-## Compose-файл не проходит проверку сети
+## The Compose Network Check Fails
 
-Проверьте, что в файле есть блок:
+Make sure the file contains:
 
 ```yaml
 networks:
@@ -124,37 +124,37 @@ networks:
     name: my-project-network
 ```
 
-И что backend/frontend подключены к этой сети.
+Also make sure the backend and frontend are attached to this network.
 
-## Конфигурация не применяется
+## Configuration Is Not Applied
 
-Проверьте, что файл `config.json` находится рядом с `containerd-ui.exe`.
+Make sure `config.json` is next to `containerd-ui.exe`.
 
-После ручного редактирования файла перезапустите приложение.
+Restart the application after editing the file manually.
 
-## Полезные команды
+## Useful Commands
 
 ```powershell
 wsl -d Ubuntu-24.04 -- nerdctl ps -a
 wsl -d Ubuntu-24.04 -- nerdctl compose -f /path/to/compose.yaml config
 ```
 
-## Логи приложения
+## Application Logs
 
-Если приложение запускается из командной строки, то основные сообщения об ошибках, инициализации, сборке и деплое выводятся в консоль. Это удобно для диагностики, потому что можно сразу увидеть, на каком этапе произошёл сбой и какой компонент не отвечает.
+When the application is started from a command prompt, error, initialization, build, and deployment messages are printed to the console. This makes it easier to identify the failing stage and the unresponsive component.
 
-Пример запуска:
+Example:
 
 ```powershell
-cd "C:\Users\User\OneDrive\Рабочий стол\project"
+cd "C:\Users\User\OneDrive\Desktop\project"
 .
 \containerd-ui.exe
 ```
 
-Если приложение падает или зависает, полезно смотреть не только пользовательский интерфейс, но и текст в консоли. Там часто видны ошибки, связанные с WSL, project path, compose-файлом, BuildKit или Cloudflare token.
+If the application crashes or hangs, check the console as well as the UI. It often reveals problems with WSL, the project path, the Compose file, BuildKit, or the Cloudflare token.
 
-## Если проблема не решена
+## If the Problem Persists
 
-- посмотрите лог деплоя в приложении;
-- проверьте логи Traefik / Cloudflared;
-- проверьте, что проект и его Compose-файл удовлетворяют требованиям сетевого окружения.
+- review the deployment log in the application;
+- check the Traefik / Cloudflared logs;
+- verify that the project and its Compose file meet the network environment requirements.

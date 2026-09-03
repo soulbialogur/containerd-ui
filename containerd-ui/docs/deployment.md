@@ -1,192 +1,192 @@
-# Деплой на домен
+# Domain Deployment
 
-## Преддеплойные проверки
+## Pre-Deployment Checks
 
-Перед стартом деплоя приложение автоматически выполняет набор проверок. Они доступны как в интерфейсе, так и могут быть запущены вручную для диагностики.
+Before deployment starts, the application runs a set of checks automatically. You can also run them manually from the UI for diagnosis.
 
-### Проверить инструменты
+### Check Tools
 
-Проверяет наличие обязательных компонентов в окружении:
+Checks that the required components are available:
 
 - `nerdctl`;
 - `containerd`;
 - `buildctl`;
-- `cloudflared` — если выбран режим Cloudflare Tunnel.
+- `cloudflared` — if Cloudflare Tunnel is selected.
 
-### Проверить порты 80/443
+### Check Ports 80/443
 
-Проверяет, свободны ли порты `80` и `443` и нет ли конфликтов на уровне WSL и Windows. Для этого учитывается как состояние внутри Linux-окружения, так и TCP dial на уровне хоста. Это особенно важно, потому что сервисы вроде IIS могут слушать порты на Windows и блокировать их для Traefik даже при отсутствии видимого конфликта из WSL.
+Checks whether ports `80` and `443` are available and whether WSL or Windows has a conflict. The check covers both the Linux environment and a host-level TCP dial. This matters because services such as IIS may listen on Windows and block Traefik even when WSL shows no conflict.
 
-### Проверить DNS
+### Check DNS
 
-Проверяет, что домен резолвится корректно и указывает на целевой сервер. Результат проверки кэшируется на 30 секунд, чтобы не повторять одинаковый запрос при повторных попытках деплоя.
+Checks that the domain resolves correctly and points to the target server. The result is cached for 30 seconds to avoid repeating the same request during deployment retries.
 
-### Общая логика
+### General Behavior
 
-Эти проверки автоматически запускаются перед деплоем, но пользователь может запустить их вручную в интерфейсе для быстрой диагностики проблем до старта прокси. В случае нарушения требований приложение показывает предупреждение и блокирует деплой до исправления окружения.
+These checks run automatically before deployment, but you can also run them manually to diagnose problems before the proxy starts. If a requirement is not met, the application shows a warning and blocks deployment until the environment is fixed.
 
-Полный набор проверок окружения и команд для каждого компонента собран в [diagnostics.md](diagnostics.md).
+The complete set of environment checks and commands is available in [diagnostics.md](diagnostics.md).
 
-## Что поддерживается
+## Supported Options
 
-Приложение поддерживает два способа деплоя:
+The application supports two deployment methods:
 
 - Traefik + Let's Encrypt
 - Cloudflare Tunnel
 
-Архитектура доступа к контейнерам и резервный WSL-слой описаны в [concepts.md](concepts.md). В деплое важно лишь то, что основной путь — gRPC, а WSL используется как надежный fallback. Настройки деплоя и пути сохраняются в `config.json` рядом с `containerd-ui.exe`.
+The container access architecture and WSL fallback are described in [concepts.md](concepts.md). For deployment, the important point is that gRPC is the primary path and WSL is the reliable fallback. Deployment settings and paths are stored in `config.json` next to `containerd-ui.exe`.
 
-## 1. Подготовка проекта
+## 1. Prepare the Project
 
-Перед деплоем проект должен содержать `compose.yaml` или `docker-compose.yml`.
+The project must contain `compose.yaml` or `docker-compose.yml` before deployment.
 
-Полный справочник по требованиям к проекту находится в [project-requirements.md](project-requirements.md). Там описаны сеть из `deploy_network`, правила подключения сервисов и корень проекта. Ниже — только краткий перечень условий, которые критичны для деплоя.
+The complete project requirements are in [project-requirements.md](project-requirements.md), including `deploy_network`, service connections, and the project root. The list below covers only the conditions critical for deployment.
 
-### Требования к проекту
+### Project Requirements
 
-- должен существовать `compose.yaml` или `docker-compose.yml`;
-- должна быть объявлена внешняя сеть из `deploy_network` с параметрами `external: true` и соответствующим `name`;
-- сервисы из `deploy_service_backend` и `deploy_service_frontend` должны быть подключены к этой сети;
-- внутренние порты сервисов должны быть заданы правильно;
-- DNS для домена должен указывать на сервер;
-- проект должен запускаться из корректного корня, где лежит compose-файл.
+- `compose.yaml` or `docker-compose.yml` must exist;
+- the network from `deploy_network` must be declared with `external: true` and the matching `name`;
+- the services from `deploy_service_backend` and `deploy_service_frontend` must be attached to this network;
+- service internal ports must be correct;
+- the domain DNS must point to the server;
+- the project must be run from the root containing the Compose file.
 
-## 2. Выбор proxy
+## 2. Choose a Proxy
 
-Вкладка “Деплой” позволяет выбрать один из режимов:
+The Deployment tab lets you choose one of these modes:
 
 ### Traefik + Let's Encrypt
 
-Подходит для обычной публикации на домен.
+Suitable for standard domain publishing.
 
-Требования:
+Requirements:
 
-- порты 80 и 443 свободны;
-- есть корректный email для Let's Encrypt;
-- DNS домена указывает на сервер.
+- ports 80 and 443 are available;
+- a valid Let's Encrypt email is configured;
+- the domain DNS points to the server.
 
 ### Cloudflare Tunnel
 
-Подходит, если вы хотите обходиться без прямого открытия портов 80/443 на сервере.
+Suitable when you do not want to expose ports 80/443 directly on the server.
 
-Требования:
+Requirements:
 
-- установлен `cloudflared`;
-- есть валидный JSON-токен Cloudflare;
-- домен уже настроен в Cloudflare.
+- `cloudflared` is installed;
+- a valid Cloudflare JSON token is available;
+- the domain is already configured in Cloudflare.
 
-## 3. Настройка маршрутов
+## 3. Configure Routes
 
-Укажите:
+Specify:
 
-- домен, например `example.com`;
-- backend prefix, например `/api`;
-- какие сервисы публиковать: backend, frontend или оба.
+- the domain, for example `example.com`;
+- the backend prefix, for example `/api`;
+- which services to publish: backend, frontend, or both.
 
-### Особенности маршрутизации
+### Routing Notes
 
-- Traefik автоматически удаляет префикс backend с помощью middleware `stripPrefix`;
-- Cloudflare не удаляет префикс автоматически, поэтому backend должен сам корректно обрабатывать путь с префиксом.
+- Traefik removes the backend prefix automatically with the `stripPrefix` middleware;
+- Cloudflare does not remove the prefix automatically, so the backend must handle prefixed paths correctly.
 
-Для Cloudflare Tunnel важно понимать, что `stripPrefix` не поддерживается таким же образом, как в Traefik. Если backend ожидает URL без префикса, но входящий запрос приходит как `/api/...`, то приложение будет маршрутизировать путь неверно и часть HTTP-маршрутов перестанет работать. Поэтому при использовании Cloudflare backend должен быть подготовлен к запросам с префиксом, например `/api`, и сам удалять этот префикс перед обработкой конечного маршрута. Это критично: при ошибке с префиксом весь маршрут может выглядеть как несуществующий или возвращать неверный контент, даже если сервис в целом запущен.
+With Cloudflare Tunnel, `stripPrefix` does not work in the same way as it does in Traefik. If the backend expects a URL without a prefix but receives `/api/...`, routing will be incorrect and some HTTP routes will stop working. The backend must therefore accept prefixed requests such as `/api` and remove the prefix before handling the final route. Otherwise the route may appear missing or return the wrong content even though the service is running.
 
-> Важно: для Cloudflare Tunnel не стоит полагаться на middleware `stripPrefix` как на автоматическую очистку пути. Если префикс должен быть удалён, это обязан делать сам backend; иначе динамические маршруты, Swagger, статические файлы и API-ендпоинты будут вести себя некорректно.
+> Important: with Cloudflare Tunnel, do not rely on `stripPrefix` as an automatic path cleanup step. If the prefix must be removed, the backend must do it; otherwise dynamic routes, Swagger, static files, and API endpoints may behave incorrectly.
 
-## 4. Предварительные проверки
+## 4. Pre-Deployment Diagnostics
 
-Перед запуском деплоя приложение делает преддеплойную диагностику. Она доступна через отдельные кнопки и используется как перед самим деплоем, так и при ручной проверке окружения.
+Before deployment starts, the application runs pre-deployment diagnostics. They are available through dedicated buttons and are used both before deployment and during manual environment checks.
 
-Для полного набора команд и проверок см. [diagnostics.md](diagnostics.md). Там собраны проверки WSL, портов, DNS, инструментов и настроенной сети.
+For the complete set of commands and checks, see [diagnostics.md](diagnostics.md). It covers WSL, ports, DNS, tools, and the configured network.
 
-### Кнопка «Проверить инструменты»
+### Check Tools Button
 
-Проверяет наличие всех обязательных компонентов в окружении:
+Checks that all required components are available:
 
 - `nerdctl`;
 - `containerd`;
 - `buildctl`;
-- `cloudflared` — если выбран режим Cloudflare Tunnel.
+- `cloudflared` — if Cloudflare Tunnel is selected.
 
-Если какой-то компонент отсутствует, приложение показывает понятное сообщение и блокирует дальнейший деплой до исправления окружения.
+If a component is missing, the application shows a clear message and blocks deployment until the environment is fixed.
 
-### Кнопка «Проверить порты 80/443»
+### Check Ports 80/443 Button
 
-Проверяет, заняты ли порты `80` и `443`. Для Traefik это критично, потому что прокси должен иметь доступ к стандартным HTTP/HTTPS-портам. Если один из портов занят, деплой блокируется до освобождения порта. В проверке учитывается и TCP dial на `localhost`, чтобы обнаружить конфликты с Windows-сервисами вроде IIS, которые могут слушать порты на хосте и не быть очевидными для WSL-проверки.
+Checks whether ports `80` and `443` are in use. This is critical for Traefik, which needs the standard HTTP/HTTPS ports. Deployment is blocked until an occupied port is freed. The check also dials `localhost` to detect Windows services such as IIS that may not be visible from WSL.
 
-### Кнопка «Проверить DNS»
+### Check DNS Button
 
-Проверяет, что домен резолвится корректно и указывает на целевой сервер. Результат проверки кэшируется на 30 секунд, чтобы не повторять запросы к DNS при повторных попытках деплоя. Это делает быстрый повторный деплой и диагностику более предсказуемым, особенно когда несколько проверок выполняются подряд.
+Checks that the domain resolves correctly and points to the target server. The result is cached for 30 seconds to avoid repeated DNS requests during deployment retries, making quick redeployments and diagnostics more predictable.
 
-### Общая логика проверок перед деплоем
+### Pre-Deployment Check Flow
 
-Приложение перед запуском деплоя выполняет базовые проверки:
+Before deployment, the application checks:
 
-- DNS домена: результат проверки кэшируется на 30 секунд;
-- свободность портов `80/443` для Traefik;
-- наличие необходимых инструментов: `nerdctl`, `containerd`, `buildctl`;
-- наличие `cloudflared` при выборе Cloudflare;
-- корректность сети из `deploy_network` в compose-файле;
-- наличие запускаемых сервисов и их внутренних портов.
+- domain DNS; the result is cached for 30 seconds;
+- whether ports `80/443` are available for Traefik;
+- required tools: `nerdctl`, `containerd`, and `buildctl`;
+- `cloudflared` when Cloudflare is selected;
+- the `deploy_network` declaration in the Compose file;
+- that the services exist and use the configured internal ports.
 
-### Внешняя сеть проекта
+### Project External Network
 
-Сеть из `deploy_network` должна существовать и быть объявлена как внешняя в compose-файле. Полный пример и правила подключения описаны в [project-requirements.md](project-requirements.md). Если сеть не создана, приложение попытается создать её автоматически, но compose-файл всё равно должен соответствовать требованиям; иначе деплой будет работать некорректно или не запустится.
+The network from `deploy_network` must exist and be declared as external in the Compose file. The full example and connection rules are in [project-requirements.md](project-requirements.md). If the network is missing, the application will try to create it, but the Compose file must still meet the requirements or deployment may fail.
 
 ## 5. Cloudflare Tunnel
 
-Для работы с Cloudflare нужно получить JSON-токен в Cloudflare Dashboard:
+To use Cloudflare, obtain a JSON token in the Cloudflare Dashboard:
 
 - Zero Trust → Networks → Tunnels
-- выбрать или создать tunnel;
-- скачать credentials-файл или получить JSON-токен;
-- сохранить его через интерфейс приложения кнопкой **«Сохранить токен»**.
+- select or create a tunnel;
+- download the credentials file or obtain a JSON token;
+- save it in the application with **Save Token**.
 
-После сохранения приложение сохраняет файл `.containerd-data/cloudflare/credentials.json` и запускает проверку:
+After saving, the application stores `.containerd-data/cloudflare/credentials.json` and runs:
 
 ```bash
 cloudflared tunnel list --credentials-file /path/to/credentials.json
 ```
 
-Если команда завершается с ошибкой, токен или credentials-файл невалидны и деплой не следует запускать. Неверный токен блокирует дальнейший деплой, чтобы пользователь не попадал в ситуацию, когда proxy запущен с некорректными credentials.
+If the command fails, the token or credentials file is invalid and deployment should not be started. An invalid token blocks deployment so the proxy is not launched with bad credentials.
 
-Проверка установки `cloudflared` и базовое состояние клинта также описаны в [installation.md](installation.md). Здесь сосредоточена именно настройка и валидация Cloudflare-подключения перед деплоем.
+The `cloudflared` installation check and basic client status are also described in [installation.md](installation.md). This section focuses on configuring and validating the Cloudflare connection before deployment.
 
-## 6. Что происходит после деплоя
+## 6. After Deployment
 
-При деплое порядок действий следующий:
+Deployment proceeds in this order:
 
-1. запускается прокси (`Traefik` или `cloudflared`);
-2. проверяется его корректный запуск и инициализация сети;
-3. запускаются сервисы проекта;
-4. приложение проверяет статус запущенных сервисов через `nerdctl compose ps`;
-5. если сервисы не стартуют или не становятся доступными, приложение выполняет автоматический откат.
+1. the proxy (`Traefik` or `cloudflared`) starts;
+2. its startup and network initialization are verified;
+3. the project services start;
+4. the application checks their status with `nerdctl compose ps`;
+5. if services fail to start or become unavailable, the application rolls back automatically.
 
-Перед сборкой проекта приложение также может автоматически управлять `buildkitd`: если демон не активен, он запускается автоматически, а после сборки приложение может его остановить, если он был запущен именно этим сеансом. Это снижает необходимость ручного запуска `buildkitd` перед каждым проектным билдом и делает деплой и сборку более предсказуемыми.
+Before building the project, the application can also manage `buildkitd` automatically. It starts an inactive daemon and may stop it afterward if this session started it. This removes the need to start `buildkitd` manually before every build.
 
-Дополнительно:
+Additionally:
 
-- Traefik создаёт и сохраняет сертификаты в `.containerd-data/traefik/acme.json`;
-- Cloudflare запускает tunnel через отдельный контейнер;
-- в логах отображается результат работы;
-- при ошибке приложение может выполнить откат и остановить активный proxy.
+- Traefik creates and stores certificates in `.containerd-data/traefik/acme.json`;
+- Cloudflare runs the tunnel in a separate container;
+- the logs show the operation result;
+- on failure, the application can roll back and stop the active proxy.
 
-## 7. Откат
+## 7. Rollback
 
-Если запуск сервисов завершился ошибкой, приложение выполняет откат:
+If service startup fails, the application:
 
-- останавливает контейнер прокси (Traefik или cloudflared);
-- удаляет контейнер прокси;
-- возвращает систему в исходное состояние.
+- stops the proxy container (Traefik or cloudflared);
+- removes the proxy container;
+- restores the original system state.
 
-Откат очищает только proxy-часть деплоя и не удаляет проект целиком, поэтому можно быстро вернуть сервис в рабочее состояние, не пересоздавая весь проект вручную. Это означает, что основная инфраструктура проекта сохраняется, а в случае проблем откатывается только внешний слой проксирования.
+Rollback cleans up only the proxy part of the deployment and does not remove the project. The project's core infrastructure is preserved; only the external proxy layer is reverted.
 
-## 8. Логи прокси
+## 8. Proxy Logs
 
-В интерфейсе есть кнопка «Логи прокси» — она показывает последние 200 строк логов контейнера прокси. Это удобно для диагностики проблем с Traefik или Cloudflare Tunnel без ручного входа в контейнер. Логи включают инициализацию, ошибки TLS/HTTP, проблемы маршрутизации и состояние tunnel-подключения.
+The UI includes a Proxy Logs button that shows the last 200 lines from the proxy container. This helps diagnose Traefik or Cloudflare Tunnel issues without opening the container manually. Logs include initialization, TLS/HTTP errors, routing problems, and tunnel status.
 
-## 9. Где хранятся файлы деплоя
+## 9. Deployment Files
 
-В корне проекта создаётся папка `.containerd-data/` с подпапками для типичных артефактов деплоя:
+The project root contains a `.containerd-data/` directory with subdirectories for common deployment artifacts:
 
 ```text
 .containerd-data/
@@ -200,15 +200,15 @@ cloudflared tunnel list --credentials-file /path/to/credentials.json
 └── ...
 ```
 
-Это позволяет хранить конфиги, compose-файлы и данные прокси отдельно от основного проекта и безопасно откатывать изменения.
+This keeps proxy configuration, Compose files, and proxy data separate from the main project and makes rollback straightforward.
 
-## 10. Полезные советы
+## 10. Practical Tips
 
-- используйте реальный email для Let's Encrypt;
-- проверяйте, что backend/frontend имеют правильные имена в Compose;
-- проверяйте внутренние порты сервисов;
-- для Traefik обязательно освобождайте порты 80 и 443;
-- для Cloudflare используйте только валидный JSON-токен;
-- перед деплоем всегда проверяйте наличие сети, указанной в `deploy_network`.
+- use a real email address for Let's Encrypt;
+- verify the backend/frontend names in Compose;
+- verify the services' internal ports;
+- always free ports 80 and 443 for Traefik;
+- use only a valid JSON token for Cloudflare;
+- always verify that the network specified by `deploy_network` exists before deployment.
 
-Подробнее про диагностику — в [Решении проблем](troubleshooting.md).
+For troubleshooting details, see [Troubleshooting](troubleshooting.md).

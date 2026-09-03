@@ -1,108 +1,108 @@
-# Основные концепции
+# Core Concepts
 
-Этот раздел содержит общие архитектурные и поведенческие принципы приложения. Он нужен, чтобы не повторять одну и ту же информацию в каждом руководстве.
+This section explains the application's main architectural and behavioral principles. The other guides refer here instead of repeating the same information.
 
-## 1. Два слоя доступа к инфраструктуре
+## 1. Two Infrastructure Access Layers
 
-Приложение работает в два слоя:
+The application uses two access layers:
 
-- gRPC API containerd — основной быстрый путь для чтения состояния, запуска и остановки контейнеров;
-- WSL + nerdctl — резервный fallback, который используется, если gRPC API недоступен, временно падает или не отвечает.
+- containerd's gRPC API is the primary, fast path for reading state and starting or stopping containers;
+- WSL + nerdctl is the fallback when the gRPC API is unavailable, temporarily fails, or stops responding.
 
-Это позволяет приложению быть устойчивым в Windows + WSL2-среде: часть действий выполняется непосредственно через Linux-окружение, а часть — через containerd API.
+This makes the application resilient in a Windows + WSL2 environment: some operations run directly in Linux, while others use the containerd API.
 
-Все WSL-команды запускаются внутри выбранного дистрибутива, обычно `Ubuntu-24.04`. Для ускорения интерфейс использует кэширование и повторно читает данные только при необходимости.
+All WSL commands run inside the selected distribution, usually `Ubuntu-24.04`. The UI uses caching to stay responsive and rereads data only when necessary.
 
-## 2. Кэширование и инвалидирование
+## 2. Caching and Invalidation
 
-В приложении используется централизованный `CacheManager`.
+The application uses a centralized `CacheManager`.
 
-Его задачи:
+Its responsibilities are to:
 
-- хранить кэш данных по контейнерам, образам, томам, сетям и статистике;
-- отслеживать события изменения состояния;
-- инвалидировать устаревшие записи при изменениях;
-- собирать базовые метрики (`hits`, `misses`, `errors`, `hitRate`).
+- cache data for containers, images, volumes, networks, and statistics;
+- track state-change events;
+- invalidate stale entries when state changes;
+- collect basic metrics (`hits`, `misses`, `errors`, `hitRate`).
 
-### Алгоритм инвалидации
+### Invalidation Algorithm
 
-Инвалидация идёт по событиям, а не по таймеру. Когда происходит изменение состояния, вызывается `GlobalCacheManager.Invalidate(eventType, reason)`. Это приводит к следующим действиям:
+Invalidation is event-driven rather than timer-driven. When state changes, `GlobalCacheManager.Invalidate(eventType, reason)` is called and:
 
-1. создаётся `CacheEvent` с типом (`CacheEventContainers`, `CacheEventImages`, `CacheEventVolumes`, `CacheEventStats` или `CacheEventAll`);
-2. событие публикуется через `Publish()`, где оно сохраняется в истории последних событий и рассылается подписчикам;
-3. затем вызывается конкретный метод очистки кэша: `CDInvalidateContainersCache()`, `CDInvalidateImagesCache()` и т. п.
-4. следующее чтение данных после обновления интерфейса идёт уже с чистого состояния.
+1. a `CacheEvent` is created with a type such as `CacheEventContainers`, `CacheEventImages`, `CacheEventVolumes`, `CacheEventStats`, or `CacheEventAll`;
+2. `Publish()` records the event in the recent history and notifies subscribers;
+3. the matching cache cleanup method is called, such as `CDInvalidateContainersCache()` or `CDInvalidateImagesCache()`;
+4. the next UI refresh reads the current state.
 
-Типичные триггеры:
+Typical triggers include:
 
-- создание/удаление контейнера;
-- запуск/остановка/перезапуск контейнера;
-- обновление образа;
-- создание/удаление тома;
-- обновление статистики ресурсов;
-- ручная очистка или массовая операция в UI.
+- creating or removing a container;
+- starting, stopping, or restarting a container;
+- updating an image;
+- creating or removing a volume;
+- refreshing resource statistics;
+- manual cleanup or a bulk UI operation.
 
-Это позволяет избежать устаревших данных в интерфейсе и уменьшить количество повторных запросов в WSL/containerd.
+This prevents stale data in the UI and reduces repeated requests to WSL/containerd.
 
-### Как устроен `CacheManager`
+### How `CacheManager` Works
 
-`CacheManager` хранит:
+`CacheManager` stores:
 
-- `events []CacheEvent` — историю последних событий инвалидации;
-- `metrics map[string]*CacheMetrics` — счётчики по каждому кэшу (`hits`, `misses`, `errors`);
-- `subscribers []func(CacheEvent)` — подписчики, которые получают уведомление после события.
+- `events []CacheEvent` — recent invalidation events;
+- `metrics map[string]*CacheMetrics` — counters for each cache (`hits`, `misses`, `errors`);
+- `subscribers []func(CacheEvent)` — subscribers notified after an event.
 
-Показатели считаются в разрезе имени кэша, например:
+Metrics are tracked by cache name, for example:
 
-- контейнеры;
-- образы;
-- тома;
-- статистика;
-- системные ресурсы.
+- containers;
+- images;
+- volumes;
+- statistics;
+- system resources.
 
-После каждого события можно получить сводку через `GetSummary()`, где вычисляется `hitRate = hits / (hits + misses) * 100`.
+After each event, `GetSummary()` returns a summary including `hitRate = hits / (hits + misses) * 100`.
 
-### Что важно понимать про кэш
+### Cache Behavior to Keep in Mind
 
-TTL и инвалидация работают вместе:
+TTL and invalidation work together:
 
-- TTL определяет естественное старение записи;
-- события инвалидации форсируют очистку сразу после изменения состояния системы.
+- TTL controls the natural expiration of an entry;
+- invalidation events force cleanup immediately after a system state change.
 
-Поэтому UI не только быстро работает, но и не остаётся "залипшим" на неактуальных данных после массовых действий.
+As a result, the UI stays fast without getting stuck on stale data after bulk operations.
 
-## 3. Режим экономии ресурсов
+## 3. Resource-Saving Mode
 
-Параметр `economy_mode` отключает фоновые обновления для неактивных вкладок. В этом случае:
+The `economy_mode` setting disables background updates for inactive tabs. In this mode:
 
-- активная вкладка продолжает обновляться;
-- неактивные вкладки приостанавливают таймеры и фоновые запросы;
-- нагрузка на CPU, WSL и containerd снижается.
+- the active tab continues to refresh;
+- inactive tabs pause timers and background requests;
+- CPU, WSL, and containerd usage is reduced.
 
-Этот режим особенно полезен при долгой работе с несколькими вкладками, большим числом контейнеров или медленной WSL-средой.
+This is especially useful when working for a long time with multiple tabs, many containers, or a slow WSL environment.
 
-## 4. BuildKit и параллелизм
+## 4. BuildKit and Concurrency
 
-Для сборки и массовых действий в приложении используются настройки:
+Builds and bulk operations use these settings:
 
-- `max_parallelism` — ограничение на параллельные сборки;
-- `container_operation_concurrency` — ограничение на массовые операции с контейнерами;
-- `buildkit_cache_ttl` и `buildkit_max_size` — правила очистки кэша BuildKit по времени и объёму.
+- `max_parallelism` limits concurrent builds;
+- `container_operation_concurrency` limits bulk container operations;
+- `buildkit_cache_ttl` and `buildkit_max_size` control BuildKit cache cleanup by age and size.
 
-Это помогает снижать нагрузку на систему и держать сборку стабильной при длительной разработке.
+These limits reduce system load and keep long-running development builds stable.
 
-## 5. Прогресс и отмена операций
+## 5. Operation Progress and Cancellation
 
-Длительные задачи идут через `OperationManager`:
+Long-running tasks go through `OperationManager`, which:
 
-- хранит статус операции;
-- показывает прогресс;
-- помечает состояние завершения;
-- автоматически очищает завершённые записи через 30 секунд.
+- stores operation status;
+- reports progress;
+- marks completion;
+- removes completed records after 30 seconds.
 
-### Как именно работает кооперативная отмена
+### Cooperative Cancellation
 
-Отмена не прерывает системный вызов напрямую. Вместо этого при запуске длительной операции создаётся `cancelCh` и передаётся в рабочую функцию. В критических точках кода выполняется проверка вроде:
+Cancellation does not interrupt a system call directly. When a long-running operation starts, it creates a `cancelCh` and passes it to the worker. The worker checks it at safe points, for example:
 
 ```go
 select {
@@ -112,7 +112,7 @@ default:
 }
 ```
 
-или другой вариант из массовых операций:
+or a bulk-operation variant:
 
 ```go
 for _, container := range containers {
@@ -127,43 +127,43 @@ for _, container := range containers {
 }
 ```
 
-Это означает, что операция перестаёт делать новые шаги в безопасной точке, а не обрывает процесс в середине вызова к WSL или `nerdctl`. Такой подход особенно важен для сборки, массового запуска/остановки контейнеров и очистки окружения.
+The operation stops at a safe point instead of being cut off in the middle of a WSL or `nerdctl` call. This matters especially for builds, bulk start/stop operations, and environment cleanup.
 
-### Что делает `OperationManager`
+### What `OperationManager` Does
 
-`OperationManager` хранит состояние по идентификатору операции и обновляет UI через callback `onUpdate`. После успешного или неуспешного завершения:
+`OperationManager` stores state by operation ID and updates the UI through the `onUpdate` callback. When an operation succeeds or fails:
 
-- `Progress` устанавливается в `1.0`;
-- `Finished` становится `true`;
-- `FinishedAt` сохраняет время завершения;
-- после 30 секунд запись удаляется автоматически.
+- `Progress` is set to `1.0`;
+- `Finished` becomes `true`;
+- `FinishedAt` stores the completion time;
+- the record is removed automatically after 30 seconds.
 
-Это даёт пользовательский прогресс без захламления UI старой историей операций.
+This gives users progress information without filling the UI with old operation history.
 
-## 6. Архитектура для разработчиков
+## 6. Developer Architecture
 
-Код построен вокруг трёх главных уровней:
+The code is organized around three main layers:
 
-- `ui/` — Fyne UI, таблицы, кнопки, прогресс, вкладки, диалоги;
-- `wsl/` — слой взаимодействия с WSL, `containerd`, `nerdctl`, `buildkitd`, валидацией и кэшами;
-- `main.go` и настройки — точка входа и инициализация приложения.
+- `ui/` — the Fyne UI, tables, buttons, progress indicators, tabs, and dialogs;
+- `wsl/` — the WSL, `containerd`, `nerdctl`, and `buildkitd` integration layer, including validation and caches;
+- `main.go` and configuration — the entry point and application initialization.
 
-Типичный путь потока данных:
+Typical data flow:
 
-1. пользователь нажимает кнопку в UI;
-2. `ui/*` формирует контекст и вызывает функцию из `wsl/*`;
-3. `wsl` выполняет проверку окружения, логирует и вызывает `RunWSLWithCancel` / gRPC-методы;
-4. после завершения результат возвращается в UI, а `CacheManager` или `OperationManager` обновляют состояние.
+1. the user clicks a UI button;
+2. `ui/*` builds the context and calls a function in `wsl/*`;
+3. `wsl` validates the environment, logs the operation, and calls `RunWSLWithCancel` or a gRPC method;
+4. the result returns to the UI, while `CacheManager` or `OperationManager` updates the state.
 
-Общие практики:
+General practices:
 
-- изменения состояния должны публиковать событие инвалидации кэша;
-- все длительные действия должны передавать `cancelCh` и проверять его в безопасных точках;
-- UI должен читать данные из кэша и обновляться через `safeUI`/callback, а не напрямую из фоновых goroutine.
+- state changes should publish a cache invalidation event;
+- long-running actions should pass `cancelCh` and check it at safe points;
+- the UI should read from the cache and update through `safeUI` or a callback rather than directly from background goroutines.
 
-## 7. Где смотреть детали
+## 7. Further Reading
 
-Если нужен практический пример настройки или диагностики, см.:
+For practical setup and diagnostic examples, see:
 
 - [quickstart.md](quickstart.md)
 - [installation.md](installation.md)
