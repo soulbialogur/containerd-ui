@@ -1,165 +1,165 @@
-# Быстрый старт
+# Quickstart
 
-## 1. Установите зависимости
+## 1. Install the Prerequisites
 
-Убедитесь, что в Windows включён WSL2 и установлен Ubuntu 24.04.
+Make sure WSL2 is enabled on Windows and Ubuntu 24.04 is installed.
 
 ```powershell
 wsl --install Ubuntu-24.04
 ```
 
-После установки проверьте доступность WSL и Linux-среды:
+After installation, verify that WSL and the Linux environment are available:
 
 ```powershell
 wsl --list --verbose
 ```
 
-Полный набор проверок контейнерной среды и сервисов собран в [diagnostics.md](diagnostics.md).
+The complete set of container environment and service checks is in [diagnostics.md](diagnostics.md).
 
-## 2. Установите минимальный набор компонентов
+## 2. Install the Minimum Components
 
-Внутри WSL должны быть доступны:
+The following must be available inside WSL:
 
 - containerd
 - nerdctl
 - buildkitd
-- cloudflared, если планируется режим Cloudflare Tunnel
+- cloudflared, if you plan to use Cloudflare Tunnel
 
-Подробная модель доступа к контейнерам и fallback-логика описаны в [concepts.md](concepts.md). Для первого запуска достаточно помнить, что основной путь — gRPC API containerd, а WSL + nerdctl используется как резервный слой.
+The container access model and fallback behavior are described in [concepts.md](concepts.md). For a first run, remember that the containerd gRPC API is the primary path and WSL + nerdctl is the fallback.
 
-Пример установки:
+Example installation:
 
 ```bash
 sudo apt update
 sudo apt install -y containerd nerdctl
 ```
 
-Подробная установка BuildKit описана в [installation.md](installation.md). Диагностику и ручной запуск см. в [troubleshooting.md](troubleshooting.md).
+For detailed BuildKit installation, see [installation.md](installation.md). For diagnostics and manual startup, see [troubleshooting.md](troubleshooting.md).
 
-## 3. Скомпилируйте приложение
+## 3. Build the Application
 
-Из папки контейнера:
+From the containerd-ui directory:
 
 ```powershell
-cd "C:\Users\User\OneDrive\Рабочий стол\project"
+cd "C:\Users\User\OneDrive\Desktop\project"
 bash build.sh
 ```
 
-После сборки должен появиться файл `containerd-ui.exe`.
+The build should produce `containerd-ui.exe`.
 
-## 4. Запустите приложение
+## 4. Start the Application
 
 ```powershell
 Start-Process .\containerd-ui.exe
 ```
 
-## 5. Настройте путь к проекту
+## 5. Set the Project Path
 
-После запуска приложения обязательно откройте вкладку “Настройки” и укажите корневую папку проекта, где лежит `compose.yaml` или `docker-compose.yml`.
+After starting the application, open the Settings tab and select the project root containing `compose.yaml` or `docker-compose.yml`.
 
-Поддерживаются пути:
+Supported path formats:
 
 - Windows: `C:\Users\User\...`
 - WSL: `/mnt/c/Users/User/...`
 
-Это обязательный шаг перед сборкой или деплоем. Если путь не указан, приложение не сможет корректно найти проект и запустить контейнеры.
+This step is required before building or deploying. Without a project path, the application cannot locate the project or start its containers.
 
-> Важно: требования к внешней сети из `deploy_network`, правильному `compose.yaml` и корню проекта описаны в [project-requirements.md](project-requirements.md). Это единственная точка, где зафиксированы обязательные условия для корректного деплоя.
+> Important: [project-requirements.md](project-requirements.md) defines the requirements for the external `deploy_network`, the Compose file, and the project root. It is the authoritative reference for a valid deployment.
 
-## 6. Проверьте статус компонентов
+## 6. Check Component Status
 
-Перейдите на вкладку “Статус” и убедитесь, что все основные компоненты работают: WSL, containerd, BuildKit, nerdctl и, при необходимости, Cloudflare Tunnel.
+Open the Status tab and make sure the main components are working: WSL, containerd, BuildKit, nerdctl, and Cloudflare Tunnel if needed.
 
-Ожидается, что соответствующие иконки будут зелёными. Если часть компонентов неактивна, сначала устраните проблему с окружением, а потом переходите к сборке проекта. Для полного набора проверок и команд см. [diagnostics.md](diagnostics.md).
+The corresponding icons should be green. If any component is inactive, fix the environment first, then build the project. For all checks and commands, see [diagnostics.md](diagnostics.md).
 
-> Для архитектуры и общего понимания поведения приложения см. [concepts.md](concepts.md).
+> For the architecture and overall application behavior, see [concepts.md](concepts.md).
 
-### Режим экономии ресурсов
+### Resource-Saving Mode
 
-Если включён `economy_mode`, неактивные вкладки приостанавливают фоновые обновления. Это снижает нагрузку на CPU, WSL и containerd. Подробное описание поведения и lifecycle вкладок — в [concepts.md](concepts.md).
+When `economy_mode` is enabled, inactive tabs pause background updates. This reduces CPU, WSL, and containerd usage. See [concepts.md](concepts.md) for details about tab lifecycle behavior.
 
-## 7. Выполните первый запуск проекта
+## 7. Run the Project for the First Time
 
-На вкладке “Контейнеры” нажмите кнопку “Собрать” для первого запуска проекта. После сборки проверьте:
+In the Containers tab, click Build to start the project for the first time. After the build, check that:
 
-- что контейнеры запустились;
-- что сервисы подключены к нужной сети;
-- что backend/frontend доступны по своим внутренним портам.
+- the containers started;
+- the services are attached to the correct network;
+- the backend and frontend are reachable on their internal ports.
 
-Сборка использует настройки из [configuration.md](configuration.md) и автоматически применяет параметры вроде `squash_layers`, `compression`, `max_parallelism`, `buildkit_cache_ttl` и `buildkit_max_size`. Полный механизм работы `BuildKit`, прогресса и отмены описан в [concepts.md](concepts.md).
+The build uses [configuration.md](configuration.md) and applies settings such as `squash_layers`, `compression`, `max_parallelism`, `buildkit_cache_ttl`, and `buildkit_max_size`. [concepts.md](concepts.md) describes BuildKit, progress reporting, and cancellation in detail.
 
-## 8. Если нужен деплой
+## 8. Deploy if Needed
 
-Если планируется публикация на домен, перейдите в отдельную вкладку “Деплой” и следуйте инструкциям. Там нужно выбрать:
+To publish the project on a domain, open the Deployment tab and choose:
 
-- домен;
-- включение/выключение HTTPS;
-- backend / frontend;
-- префикс backend;
-- прокси: Traefik или Cloudflare.
+- the domain;
+- whether HTTPS is enabled;
+- backend, frontend, or both;
+- the backend prefix;
+- a proxy: Traefik or Cloudflare.
 
-Перед запуском деплоя приложение выполняет преддеплойные проверки. Они включают:
+Before deployment, the application runs pre-deployment checks for:
 
-- проверку DNS и корректности домена;
-- проверку занятости портов `80` и `443`;
-- проверку доступности необходимых инструментов (`cloudflared`, `nerdctl`, `buildkitd` и т. д.);
-- контроль корректности маршрутизации и сетевого окружения.
+- DNS and domain validity;
+- whether ports `80` and `443` are in use;
+- required tools (`cloudflared`, `nerdctl`, `buildkitd`, and so on);
+- routing and network configuration.
 
-Эти проверки помогают диагностировать проблемы до старта прокси и снижают риск поломки конфигурации в момент публикации.
+These checks help find problems before the proxy starts and reduce the risk of a broken deployment.
 
-Важно:
+Important:
 
-- для Traefik порты `80` и `443` должны быть свободны;
-- для Cloudflare нужен валидный JSON-токен, который реально проверяется приложением;
-- токен сохраняется через интерфейс в настройках деплоя, а не просто вставляется как произвольная строка.
+- Traefik requires ports `80` and `443` to be available;
+- Cloudflare requires a valid JSON token, which the application validates;
+- save the token through the deployment settings rather than pasting an arbitrary string.
 
-Полный список требований к проекту и сетевым параметрам см. в [project-requirements.md](project-requirements.md). Команды и проверки окружения собраны в [diagnostics.md](diagnostics.md).
+See [project-requirements.md](project-requirements.md) for project and network requirements, and [diagnostics.md](diagnostics.md) for environment checks and commands.
 
-## 9. Управление контейнерами
+## 9. Manage Containers
 
-### Массовые операции
+### Bulk Operations
 
-Вкладка “Контейнеры” поддерживает массовые операции:
+The Containers tab supports bulk operations:
 
-- **Запустить** без выбора запускает все остановленные контейнеры;
-- **Остановить** без выбора останавливает все запущенные контейнеры;
-- **Удалить** без выбора удаляет все контейнеры после подтверждения.
+- **Start** with nothing selected starts all stopped containers;
+- **Stop** with nothing selected stops all running containers;
+- **Remove** with nothing selected removes all containers after confirmation.
 
-Если контейнер не выбран, приложение применяет действие ко всем подходящим контейнерам в текущем списке. Это удобно для быстрого восстановления окружения после сбоев или при необходимости полной перезагрузки проекта.
+When no container is selected, the application applies the action to every matching container in the current list. This is useful for quickly recovering the environment or restarting the entire project.
 
-Массовые операции выполняются через `runContainerOperations` и пул воркеров, ограниченный параметром `container_operation_concurrency`. Он задаёт число одновременно выполняемых запусков, остановок и удалений, снижая перегрузку WSL/containerd и сохраняя стабильность при работе с несколькими сервисами.
+Bulk operations use `runContainerOperations` and a worker pool limited by `container_operation_concurrency`. This setting controls how many starts, stops, and removals run at once, reducing WSL/containerd load.
 
-### Обновление образа контейнера
+### Update a Container Image
 
-Кнопка **“Обновить образ”** позволяет заменить образ контейнера на другой без ручного пересоздания сценария. Последовательность действий следующая:
+The **Update Image** button replaces a container image without requiring you to recreate the workflow manually:
 
-1. приложение останавливает контейнер;
-2. удаляет старый экземпляр;
-3. подтягивает новый образ (`pull`);
-4. пересоздаёт контейнер с сохранением томов, портов, переменных окружения и сетевой конфигурации.
+1. the application stops the container;
+2. removes the old instance;
+3. pulls the new image;
+4. recreates the container while preserving volumes, ports, environment variables, and network settings.
 
-Это эквивалентно замене образа «на лету» без потери данных: тома и пользовательские данные остаются на месте, а контейнер пересоздаётся с обновлённой сборкой. Важно, что базовая конфигурация и сетевые параметры сохраняются, поэтому сервис продолжает работать в том же окружении после обновления.
+This is effectively an in-place image replacement without data loss. Volumes and user data remain intact, while the container is recreated from the updated image with the same configuration.
 
-### Очистка логов
+### Clear Logs
 
-Во вкладке “Логи” доступна кнопка **“Очистить логи”**. Она обрезает файл лога контейнера до нулевого размера, но не удаляет сам файл. Это полезно для экономии места и упрощения отладки, потому что журнал можно быстро очистить без потери привычного пути к лог-файлу и без необходимости пересоздавать контейнер.
+The Logs tab has a **Clear Logs** button. It truncates the container log file to zero bytes without deleting the file, saving disk space while keeping the same log path.
 
-### Режим экономии ресурсов
+### Resource-Saving Mode
 
-Если включён `economy_mode`, автообновление работает только для активной вкладки. Неактивные панели не запрашивают состояние в фоне, что снижает нагрузку на CPU, WSL и containerd. Это особенно полезно при длительной работе с большим числом контейнеров и проектов.
+When `economy_mode` is enabled, automatic refresh runs only for the active tab. Inactive panels do not request background state, reducing CPU, WSL, and containerd usage.
 
-Проще говоря: пока вкладка не активна, обновления приостанавливаются, чтобы снизить нагрузку и не делать лишние запросы к WSL/containerd без необходимости.
+In short, updates pause while a tab is inactive, avoiding unnecessary requests to WSL/containerd.
 
-## 10. Что делать, если что-то не работает
+## 10. If Something Does Not Work
 
-Сначала проверьте:
+Start by checking that:
 
-- WSL установлен и запущен;
-- в проекте есть compose-файл;
-- сервисы и порты указаны правильно;
-- порты 80 и 443 не заняты;
-- DNS корректно указывает на домен;
-- для Cloudflare токен действителен и сохранён корректно;
-- необходимые инструменты (`buildkitd`, `nerdctl`, `cloudflared`) доступны в окружении.
+- WSL is installed and running;
+- the project contains a Compose file;
+- services and ports are configured correctly;
+- ports 80 and 443 are available;
+- DNS points to the correct domain;
+- the Cloudflare token is valid and saved correctly;
+- the required tools (`buildkitd`, `nerdctl`, `cloudflared`) are available.
 
-Подробные проверки и диагностика доступны в [Решении проблем](troubleshooting.md), а также в разделах о [деплое](deployment.md) и [конфигурации](configuration.md).
+For detailed troubleshooting, see [Troubleshooting](troubleshooting.md), [Deployment](deployment.md), and [Configuration](configuration.md).

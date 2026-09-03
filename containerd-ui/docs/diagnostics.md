@@ -1,20 +1,20 @@
-# Диагностика окружения
+# Environment Diagnostics
 
-Этот файл является единственным справочником по проверкам окружения и командной диагностике. В установке, деплое и troubleshooting оставлены только короткие ссылки на него, чтобы не повторять один и тот же набор команд в нескольких местах.
+This is the single reference for environment checks and command-line diagnostics. The installation, deployment, and troubleshooting guides link here instead of repeating the same commands.
 
-## 1. Проверка WSL
+## 1. Check WSL
 
 ```powershell
 wsl --list --verbose
 ```
 
-Если дистрибутива нет:
+If the distribution is not installed:
 
 ```powershell
 wsl --install Ubuntu-24.04
 ```
 
-Проверка внутри WSL:
+Check from inside WSL:
 
 ```powershell
 wsl -d Ubuntu-24.04 -- nerdctl version
@@ -22,14 +22,14 @@ wsl -d Ubuntu-24.04 -- systemctl is-active containerd
 wsl -d Ubuntu-24.04 -- systemctl is-active buildkit
 ```
 
-## 2. Проверка containerd и nerdctl
+## 2. Check containerd and nerdctl
 
 ```bash
 nerdctl info
 systemctl status containerd
 ```
 
-Если контейнерный runtime не запущен:
+If the container runtime is not running:
 
 ```bash
 sudo systemctl enable containerd
@@ -37,48 +37,48 @@ sudo systemctl start containerd
 sudo systemctl status containerd
 ```
 
-## 3. Проверка BuildKit
+## 3. Check BuildKit
 
 ```bash
 sudo systemctl status buildkit
 sudo systemctl is-active buildkit
 ```
 
-Если сервис не запущен:
+If the service is not running:
 
 ```bash
 sudo systemctl start buildkit
 ```
 
-Если нужен прямой старт:
+For a direct start:
 
 ```bash
 sudo buildkitd --addr unix:///run/buildkit/buildkitd.sock
 ```
 
-## 4. Проверка инструментов деплоя
+## 4. Check Deployment Tools
 
-Для деплоя должны быть доступны:
+The following tools must be available for deployment:
 
 - `nerdctl`
 - `containerd`
 - `buildctl`
-- `cloudflared` (если выбран Cloudflare Tunnel)
+- `cloudflared` (if Cloudflare Tunnel is selected)
 
-Проверка:
+Check them with:
 
 ```bash
 cloudflared --version
 cloudflared tunnel list --help
 ```
 
-Если нужна валидация credentials:
+To validate the credentials:
 
 ```bash
 cloudflared tunnel list --credentials-file /path/to/credentials.json
 ```
 
-## 5. Проверка портов 80 и 443
+## 5. Check Ports 80 and 443
 
 Windows:
 
@@ -87,45 +87,45 @@ netstat -ano | findstr :80
 netstat -ano | findstr :443
 ```
 
-Linux внутри WSL:
+Linux inside WSL:
 
 ```bash
 sudo ss -tulpn | grep ':80\|:443'
 ```
 
-Для Traefik порты `80` и `443` должны быть свободны.
+Ports `80` and `443` must be available for Traefik.
 
-## 6. Проверка DNS
+## 6. Check DNS
 
 ```bash
 nslookup example.com
 ```
 
-или:
+or:
 
 ```bash
 getent hosts example.com
 ```
 
-Перед деплоем домен должен корректно резолвиться и указывать на целевой сервер.
+Before deployment, the domain must resolve correctly and point to the target server.
 
-## 7. Проверка внешней сети проекта
+## 7. Check the Project's External Network
 
-Используйте имя сети из `deploy_network` в `config.json`. Ниже `my-project-network` — пример, замените его на своё значение.
+Use the network name from `deploy_network` in `config.json`. The examples below use `my-project-network`; replace it with your value.
 
-Проверить, что сеть существует:
+Check that the network exists:
 
 ```bash
 nerdctl network ls
 ```
 
-Если её нет, можно создать вручную:
+If it does not exist, create it manually:
 
 ```bash
 nerdctl network create --driver bridge my-project-network
 ```
 
-Но в compose-файле она всё равно должна быть объявлена как external:
+It must still be declared as external in the Compose file:
 
 ```yaml
 networks:
@@ -134,11 +134,11 @@ networks:
     name: my-project-network
 ```
 
-## 8. Проверка project path
+## 8. Check the Project Path
 
-Путь к проекту должен указывать на корень проекта, а не на файл `compose.yaml`.
+The project path must point to the project root, not to the `compose.yaml` file.
 
-Проверить можно по фактической структуре:
+You can verify it by checking the directory structure:
 
 ```text
 project/
@@ -148,17 +148,17 @@ project/
 └── ...
 ```
 
-## 9. Когда использовать этот файл
+## 9. When to Use This Guide
 
-Используйте этот документ, если нужно быстро проверить:
+Use this guide when you need to quickly check:
 
-- WSL и Linux-среду;
+- WSL and the Linux environment;
 - `containerd`, `nerdctl`, `buildkitd`;
-- порты и DNS;
+- ports and DNS;
 - Cloudflare credentials;
-- сеть из `deploy_network`.
+- the network from `deploy_network`.
 
-Подробнее:
+See also:
 
 - [installation.md](installation.md)
 - [deployment.md](deployment.md)

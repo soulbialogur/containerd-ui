@@ -1,49 +1,49 @@
-# Установка окружения
+# Environment Setup
 
-## Требования
+## Requirements
 
 - Windows 10/11
 - WSL2
 - Ubuntu 24.04
-- доступ к PowerShell
-- права на установку пакетов в WSL
-- Go 1.26+ — требуется для сборки приложения из исходников
+- access to PowerShell
+- permission to install packages in WSL
+- Go 1.26+ — required to build the application from source
 
-## Установка WSL
+## Install WSL
 
 ```powershell
 wsl --install Ubuntu-24.04
 ```
 
-Проверка:
+Verify it:
 
 ```powershell
 wsl --list --verbose
 ```
 
-## Проверка контейнерной среды
+## Verify the Container Environment
 
-Для полного списка команд и сценариев проверки используйте [diagnostics.md](diagnostics.md). Там собраны проверки WSL, `containerd`, `nerdctl`, `buildkitd`, портов, DNS и Cloudflare credentials.
+For the complete list of verification commands and scenarios, see [diagnostics.md](diagnostics.md). It covers WSL, `containerd`, `nerdctl`, `buildkitd`, ports, DNS, and Cloudflare credentials.
 
-Если чего-то нет — установите или запустите сервисы вручную и затем повторно сверяйте состояние по диагностическому разделу.
+If anything is missing, install or start the services manually, then check their status again using the diagnostics guide.
 
-## Установка containerd и nerdctl
+## Install containerd and nerdctl
 
 ```bash
 sudo apt update
 sudo apt install -y containerd nerdctl
 ```
 
-После установки проверьте:
+After installation, verify them:
 
 ```bash
 nerdctl version
 nerdctl info
 ```
 
-## Установка и запуск BuildKit
+## Install and Start BuildKit
 
-BuildKit обязателен для сборки образов в приложении. Установите пакет и убедитесь, что сервис доступен в WSL:
+BuildKit is required to build images in the application. Install the package and make sure the service is available in WSL:
 
 ```bash
 sudo apt install -y buildkit
@@ -51,9 +51,9 @@ sudo systemctl enable buildkit
 sudo systemctl start buildkit
 ```
 
-Полный набор команд проверки и сценариев старта/ошибок собран в [diagnostics.md](diagnostics.md). Если демон не запускается или падает, см. также [troubleshooting.md](troubleshooting.md). Приложение умеет запускать `buildkitd` автоматически в момент сборки, если он не активен.
+The complete set of verification commands and startup/error scenarios is available in [diagnostics.md](diagnostics.md). If the daemon will not start or keeps failing, also see [troubleshooting.md](troubleshooting.md). The application can start `buildkitd` automatically when a build begins if it is not already running.
 
-## Запуск containerd
+## Start containerd
 
 ```bash
 sudo systemctl enable containerd
@@ -61,31 +61,31 @@ sudo systemctl start containerd
 sudo systemctl status containerd
 ```
 
-## Установка Cloudflare Tunnel
+## Install Cloudflare Tunnel
 
-Если планируется работать через Cloudflare Tunnel, установите `cloudflared` по официальной инструкции:
+If you plan to use Cloudflare Tunnel, install `cloudflared` using the official instructions:
 
 - https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
 
-Важно: `cloudflared` должен быть доступен в `PATH` внутри WSL. Если бинарник установлен, но не виден в shell, приложение не сможет корректно проверить токен и деплой будет остановлен до запуска прокси.
+Important: `cloudflared` must be available in the WSL `PATH`. If the binary is installed but not visible to the shell, the application cannot validate the token correctly and will stop deployment before starting the proxy.
 
-Полная проверка токена и сценарий настройки описаны в [deployment.md](deployment.md). В этом документе достаточно установить бинарник и убедиться, что он доступен в `PATH`.
+The complete token validation and setup flow is described in [deployment.md](deployment.md). Here, it is enough to install the binary and verify that it is available in `PATH`.
 
-## Проверка портов
+## Verify Ports
 
-Для Traefik + Let's Encrypt порты `80` и `443` должны быть свободны. Подробная логика проверки и объяснение, почему конфликт может быть на уровне Windows и WSL, описаны в [deployment.md](deployment.md). Для диагностики и команд см. также [diagnostics.md](diagnostics.md).
+For Traefik + Let's Encrypt, ports `80` and `443` must be available. [deployment.md](deployment.md) explains how the check works and why a conflict may exist at either the Windows or WSL level. For commands and troubleshooting, also see [diagnostics.md](diagnostics.md).
 
-Если порты заняты, сначала освободите их или остановите конфликтующий сервис.
+If either port is in use, free it or stop the service that is occupying it.
 
-## Проверка внешней сети проекта
+## Verify the Project's External Network
 
-Требования к сети и compose-файлу собраны в [project-requirements.md](project-requirements.md). Там описаны внешний `network`, привязка сервисов `backend`/`frontend` и корректный корень проекта.
+Network and Compose requirements are collected in [project-requirements.md](project-requirements.md). It explains the external `network`, how to attach the `backend`/`frontend` services, and how to identify the correct project root.
 
-Если сеть отсутствует, приложение может создать её автоматически, но в compose-файле она всё равно должна быть объявлена как `external: true` с именем из `deploy_network`, иначе окружение будет работать некорректно или деплой не запустится.
+If the network does not exist, the application may create it automatically, but the Compose file must still declare it as `external: true` with the name from `deploy_network`; otherwise the environment may behave incorrectly or deployment will fail.
 
-Для быстрых проверок окружения и команд см. [diagnostics.md](diagnostics.md).
+For quick environment checks and commands, see [diagnostics.md](diagnostics.md).
 
-## Рекомендуемая схема окружения
+## Recommended Environment Layout
 
 ```text
 Windows
@@ -97,14 +97,14 @@ Windows
     └── app project
 ```
 
-## Как приложение обращается к контейнерам
+## How the Application Accesses Containers
 
-Основная схема работы с контейнерами и fallback-логика описаны в [concepts.md](concepts.md). В этом разделе достаточно помнить, что приоритет у gRPC API containerd, а WSL + nerdctl используется как резервный путь при сбоях или недоступности gRPC.
+The main container access model and fallback behavior are described in [concepts.md](concepts.md). The short version is that the containerd gRPC API has priority, while WSL + nerdctl is used as a fallback when gRPC fails or is unavailable.
 
-## Где хранится конфигурация
+## Where Configuration Is Stored
 
-Все настройки деплоя, пути к проекту и параметры окружения сохраняются в `config.json` рядом с исполняемым файлом `containerd-ui.exe`. Это включает WSL-дистрибутив, proxy, домены, сервисы и внутренние порты приложений.
+Deployment settings, project paths, and environment parameters are stored in `config.json` next to `containerd-ui.exe`. This includes the WSL distribution, proxy, domains, services, and internal application ports.
 
-## Что дальше
+## Next Steps
 
-После подготовки окружения переходите к [Быстрому старту](quickstart.md) или [Конфигурации](configuration.md).
+Once the environment is ready, continue with the [Quickstart](quickstart.md) or [Configuration](configuration.md) guide.
