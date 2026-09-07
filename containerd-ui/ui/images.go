@@ -1,8 +1,8 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
-	"fmt"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -24,7 +24,7 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 			label.Wrapping = fyne.TextTruncate
 
 			if i.Row == 0 {
-				headers := []string{"ID", "Репозиторий", "Тег", "Размер", "Создан"}
+				headers := []string{i18n.T("images.id"), i18n.T("images.repository"), i18n.T("images.tag"), i18n.T("images.size"), i18n.T("images.created")}
 				label.SetText(headers[i.Col])
 				label.TextStyle = fyne.TextStyle{Bold: true}
 				return
@@ -76,9 +76,9 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 		}
 	}
 
-	btnRemove := widget.NewButton("Удалить образ", func() {
+	btnRemove := widget.NewButton(i18n.T("images.remove"), func() {
 		if selectedID != "" {
-			dialog.ShowConfirm("Удаление образа", fmt.Sprintf("Удалить образ %s?", selectedID), func(ok bool) {
+			dialog.ShowConfirm(i18n.T("images.remove"), i18n.T("images.confirm_remove", selectedID), func(ok bool) {
 				if ok {
 					go func() {
 						select {
@@ -101,7 +101,7 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 			}, win)
 		}
 	})
-	btnRefresh := widget.NewButton("Обновить", refresh)
+	btnRefresh := widget.NewButton(i18n.T("images.refresh"), refresh)
 
 	topBar := container.NewHBox(btnRemove, btnRefresh)
 	refresh()

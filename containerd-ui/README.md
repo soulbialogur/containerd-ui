@@ -66,3 +66,4 @@ Your main settings live in `config.json`, sitting right next to the executable. 
 - [Configuration](docs/configuration.md)
 - [Deploying to a Domain](docs/deployment.md)
 - [Troubleshooting](docs/troubleshooting.md)
+

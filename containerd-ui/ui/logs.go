@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 
 	"fyne.io/fyne/v2"
@@ -15,12 +16,12 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	logText := widget.NewMultiLineEntry()
 	logText.Wrapping = fyne.TextWrapWord
 	logText.Disable()
-	logText.SetPlaceHolder("Выберите контейнер для просмотра логов")
+	logText.SetPlaceHolder(i18n.T("logs.select_hint"))
 
 	loadLogs := func(id string) {
 		if id == "" {
 			safeUI(func() {
-				logText.SetText("Выберите контейнер для просмотра логов")
+				logText.SetText(i18n.T("logs.select_hint"))
 				logText.Refresh()
 			})
 			return
@@ -36,7 +37,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 				if err == nil {
 					logText.SetText(logs)
 				} else {
-					logText.SetText("Ошибка: " + err.Error())
+					logText.SetText(i18n.T("op.error", err.Error()))
 				}
 				logText.Refresh()
 			})
@@ -67,7 +68,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			data, err := wsl.ListContainers(true)
 			safeUI(func() {
 				if err != nil {
-					logText.SetText("Ошибка: " + err.Error())
+					logText.SetText(i18n.T("op.error", err.Error()))
 					return
 				}
 				containers = data
@@ -85,18 +86,18 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 		}()
 	}
 
-	btnRefresh := widget.NewButton("Обновить логи", func() {
+	btnRefresh := widget.NewButton(i18n.T("logs.refresh"), func() {
 		if selectedID != "" {
 			loadLogs(selectedID)
 		}
 	})
 
-	btnRefreshList := widget.NewButton("Список", refresh)
+	btnRefreshList := widget.NewButton(i18n.T("logs.list"), refresh)
 
-	btnClearLogs := widget.NewButton("Очистить логи", func() {
+	btnClearLogs := widget.NewButton(i18n.T("logs.clear"), func() {
 		if selectedID == "" {
 			safeUI(func() {
-				logText.SetText("Выберите контейнер для очистки логов")
+				logText.SetText(i18n.T("logs.select_clear_hint"))
 				logText.Refresh()
 			})
 			return
@@ -110,7 +111,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			err := wsl.ClearContainerLogs(selectedID)
 			safeUI(func() {
 				if err != nil {
-					logText.SetText("Ошибка очистки логов: " + err.Error())
+					logText.SetText(i18n.T("logs.clear_error", err.Error()))
 				} else {
 					loadLogs(selectedID)
 				}
@@ -120,7 +121,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	})
 
 	topBar := container.NewHBox(
-		widget.NewLabel("Контейнер:"),
+		widget.NewLabel(i18n.T("logs.container")),
 		selector,
 		btnRefreshList,
 		btnRefresh,
