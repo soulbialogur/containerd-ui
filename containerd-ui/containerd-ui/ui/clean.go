@@ -1,0 +1,306 @@
+package ui
+
+import (
+	"context"
+	"containerd-ui/wsl"
+	"fmt"
+	"strings"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
+)
+
+func BuildCleanTab() fyne.CanvasObject {
+	lblResult := widget.NewLabel("")
+	lblResult.TextStyle = fyne.TextStyle{Bold: false}
+	lblResult.Wrapping = fyne.TextWrapWord
+
+	resultScroll := container.NewScroll(lblResult)
+	resultScroll.SetMinSize(fyne.NewSize(0, 200))
+
+	formatCacheResult := func(result string, err error) string {
+		if err != nil {
+			return "❌ Очистка не выполнена\n\n" + err.Error()
+		}
+
+		lines := make([]string, 0)
+		for _, line := range strings.Split(strings.TrimSpace(result), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+		if len(lines) == 0 {
+			lines = append(lines, "Удалять нечего — кэш уже чист")
+		}
+
+		return "✅ Очистка завершена\n\n" +
+			"🧹 Кэш и dangling-образы\n" +
+			"Удалены временные и неиспользуемые данные.\n\n" +
+			strings.Join(lines, "\n")
+	}
+
+	btnCache := widget.NewButton("Очистить кэш и dangling-образы", nil)
+	btnCache.OnTapped = func() {
+		safeUI(func() {
+			lblResult.SetText("⏳ Очистка кэша и dangling-образов...\n\nПроверяем и удаляем неиспользуемые данные.")
+			btnCache.Disable()
+		})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnCache.Enable()
+						btnCache.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+			res, err := wsl.CleanNerdctlCache()
+			safeUI(func() {
+				lblResult.SetText(formatCacheResult(res, err))
+				btnCache.Enable()
+				btnCache.Refresh()
+				lblResult.Refresh()
+			})
+		}()
+	}
+
+	btnVolumes := widget.NewButton("Очистить неиспользуемые тома", nil)
+	btnVolumes.OnTapped = func() {
+		safeUI(func() {
+			lblResult.SetText("Выполняется очистка томов...")
+			btnVolumes.Disable()
+		})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnVolumes.Enable()
+						btnVolumes.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+			ctx, cancel := context.WithCancel(wsl.AppContext())
+			defer cancel()
+			res, err := wsl.CleanUnusedVolumes(ctx)
+			safeUI(func() {
+				if err != nil {
+					lblResult.SetText("Ошибка: " + err.Error())
+				} else {
+					lblResult.SetText("✅ " + res)
+				}
+				btnVolumes.Enable()
+				btnVolumes.Refresh()
+				lblResult.Refresh()
+			})
+		}()
+	}
+
+	btnNetworks := widget.NewButton("Очистить неиспользуемые сети", nil)
+	btnNetworks.OnTapped = func() {
+		safeUI(func() {
+			lblResult.SetText("Выполняется очистка сетей...")
+			btnNetworks.Disable()
+		})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnNetworks.Enable()
+						btnNetworks.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+			ctx, cancel := context.WithCancel(wsl.AppContext())
+			defer cancel()
+			res, err := wsl.CleanUnusedNetworks(ctx)
+			safeUI(func() {
+				if err != nil {
+					lblResult.SetText("Ошибка: " + err.Error())
+				} else {
+					lblResult.SetText("✅ " + res)
+				}
+				btnNetworks.Enable()
+				btnNetworks.Refresh()
+				lblResult.Refresh()
+			})
+		}()
+	}
+
+	btnImages := widget.NewButton("Очистить образы без тегов", nil)
+	btnImages.OnTapped = func() {
+		safeUI(func() {
+			lblResult.SetText("Выполняется очистка образов...")
+			btnImages.Disable()
+		})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnImages.Enable()
+						btnImages.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+			ctx, cancel := context.WithCancel(wsl.AppContext())
+			defer cancel()
+			res, err := wsl.CleanUntaggedImages(ctx)
+			safeUI(func() {
+				if err != nil {
+					lblResult.SetText("Ошибка: " + err.Error())
+				} else {
+					lblResult.SetText("✅ " + res)
+				}
+				btnImages.Enable()
+				btnImages.Refresh()
+				lblResult.Refresh()
+			})
+		}()
+	}
+
+	btnBuildkit := widget.NewButton("Очистить кэш BuildKit", nil)
+	btnBuildkit.OnTapped = func() {
+		safeUI(func() {
+			lblResult.SetText("Выполняется очистка кэша BuildKit...")
+			btnBuildkit.Disable()
+		})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnBuildkit.Enable()
+						btnBuildkit.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+			ctx, cancel := context.WithCancel(wsl.AppContext())
+			defer cancel()
+			res, err := wsl.CleanBuildkitCache(ctx)
+			safeUI(func() {
+				if err != nil {
+					lblResult.SetText("Ошибка: " + err.Error())
+				} else {
+					lblResult.SetText(res)
+				}
+				btnBuildkit.Enable()
+				btnBuildkit.Refresh()
+				lblResult.Refresh()
+			})
+		}()
+	}
+
+	btnFull := widget.NewButton("Полная очистка (все)", nil)
+	btnFull.OnTapped = func() {
+		safeUI(func() {
+			lblResult.SetText("Выполняется полная очистка...")
+			btnFull.Disable()
+		})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					safeUI(func() {
+						lblResult.SetText(fmt.Sprintf("❌ Паника: %v", r))
+						btnFull.Enable()
+						btnFull.Refresh()
+						lblResult.Refresh()
+					})
+				}
+			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+			ctx, cancel := context.WithCancel(wsl.AppContext())
+			defer cancel()
+
+			var results []string
+
+			if res, err := wsl.CleanNerdctlCache(); err == nil {
+				results = append(results, "🗑️ Кэш: "+res)
+			}
+			if res, err := wsl.CleanUnusedVolumes(ctx); err == nil {
+				results = append(results, "📦 Тома: "+res)
+			}
+			if res, err := wsl.CleanUnusedNetworks(ctx); err == nil {
+				results = append(results, "🌐 Сети: "+res)
+			}
+			if res, err := wsl.CleanUntaggedImages(ctx); err == nil {
+				results = append(results, "🖼️ Образы: "+res)
+			}
+			if res, err := wsl.CleanBuildkitCache(ctx); err == nil {
+				results = append(results, "🔨 BuildKit:\n"+res)
+			}
+
+			safeUI(func() {
+				if len(results) > 0 {
+					lblResult.SetText("✅ Полная очистка завершена:\n" + strings.Join(results, "\n"))
+				} else {
+					lblResult.SetText("✅ Всё чисто! Нечего удалять.")
+				}
+				btnFull.Enable()
+				btnFull.Refresh()
+				lblResult.Refresh()
+			})
+		}()
+	}
+
+	infoLabel := widget.NewLabel("Доступные операции:\n\n" +
+		"🗑️ Кэш и dangling-образы — удаляет временные файлы, кэш сборки nerdctl, логи старше 7 дней\n\n" +
+		"🔨 Кэш BuildKit — удаляет кэш сборки BuildKit старше 24 часов и неиспользуемые ресурсы\n\n" +
+		"📦 Неиспользуемые тома — удаляет тома, которые не подключены ни к одному контейнеру\n\n" +
+		"🌐 Неиспользуемые сети — удаляет пользовательские сети, не используемые контейнерами\n\n" +
+		"🖼️ Образы без тегов — удаляет все образы без тегов (не только dangling, но и все незафиксированные)\n\n" +
+		"⚠️ Внимание: перед полной очисткой рекомендуется проверить список ресурсов.")
+
+	return withResponsiveScroll(container.NewVBox(
+		widget.NewLabelWithStyle("Очистка системы", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		infoLabel,
+		container.NewVBox(
+			container.NewHBox(btnCache, btnBuildkit),
+			container.NewHBox(btnVolumes, btnImages),
+			container.NewBorder(nil, nil, nil, nil, btnFull),
+		),
+		widget.NewSeparator(),
+		container.NewVBox(
+			widget.NewLabelWithStyle("Результат:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			resultScroll,
+		),
+	))
+}
