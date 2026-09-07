@@ -15,7 +15,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// ScrollableEntry — кастомное поле ввода, которое не блокирует прокрутку.
 type ScrollableEntry struct {
 	widget.Entry
 }
@@ -26,9 +25,7 @@ func NewScrollableEntry() *ScrollableEntry {
 	return entry
 }
 
-func (e *ScrollableEntry) Scrolled(_ *fyne.ScrollEvent) {
-	// Пустой — прокрутка уходит к родителю
-}
+func (e *ScrollableEntry) Scrolled(_ *fyne.ScrollEvent) {}
 
 func makeSettingEntry(placeHolder string) *ScrollableEntry {
 	entry := NewScrollableEntry()
@@ -58,13 +55,155 @@ func deploymentProxyConfigValue(uiValue string) string {
 	}
 }
 
-// BuildSettingsTab — переработанная вкладка настроек с карточками.
 func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	config, _ := wsl.LoadConfig()
 
-	// Поля ввода
+	entryProjectName := makeSettingEntry("Имя проекта (необязательно)")
+
 	entryPath := makeSettingEntry("Путь к папке с docker-compose.yml")
-	entryPath.SetText(config.ProjectPath)
+	entryPath.SetText(wsl.GetActiveProjectPath())
+	entryPath.OnChanged = func(text string) {
+		projects := wsl.GetProjects()
+		for _, p := range projects {
+			if p.Path == text {
+				entryProjectName.SetText(p.Name)
+				return
+			}
+		}
+	}
+
+	projectsList := widget.NewList(
+		func() int {
+			return len(wsl.GetProjects())
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("template")
+			label.Wrapping = fyne.TextTruncate
+			return label
+		},
+		func(id widget.ListItemID, item fyne.CanvasObject) {
+			projects := wsl.GetProjects()
+			if id < len(projects) {
+				label := item.(*widget.Label)
+				label.SetText(projects[id].NameWithFallback())
+			}
+		},
+	)
+
+	btnAddProject := widget.NewButton("➕ Добавить проект", nil)
+	btnRemoveProject := widget.NewButton("🗑️ Удалить проект", nil)
+	btnRenameProject := widget.NewButton("✏️ Переименовать", nil)
+
+	var selectedProjectPath string
+
+	updateProjectsList := func() {
+		projectsList.Refresh()
+	}
+
+	btnAddProject.OnTapped = func() {
+		dialog.ShowFileOpen(func(u fyne.URIReadCloser, err error) {
+			if err != nil || u == nil {
+				return
+			}
+			path := u.URI().Path()
+			if path == "" {
+				u.Close()
+				return
+			}
+			u.Close()
+
+			composeExists := false
+			for _, name := range []string{"compose.yaml", "docker-compose.yml"} {
+				if _, err := os.Stat(filepath.Join(path, name)); err == nil {
+					composeExists = true
+					break
+				}
+			}
+
+			if err := wsl.AddProject(path); err != nil {
+				dialog.ShowError(err, win)
+				return
+			}
+
+			entryPath.SetText(path)
+			entryProjectName.SetText("")
+			updateProjectsList()
+
+			msg := "Проект добавлен: " + path
+			if composeExists {
+				msg += "\n✅ Найдён docker-compose.yml"
+			} else {
+				msg += "\n⚠️ Не найден docker-compose.yml"
+			}
+			dialog.ShowCustom("Проект добавлен", "ОК", widget.NewLabel(msg), win)
+		}, win)
+	}
+
+	btnRemoveProject.OnTapped = func() {
+		if selectedProjectPath == "" {
+			dialog.ShowInformation("Не выбрано", "Выберите проект для удаления из списка.", win)
+			return
+		}
+
+		confirmDialog := dialog.NewCustomConfirm(
+			"Удалить проект",
+			"Удалить",
+			"Отмена",
+			widget.NewLabel("Удалить проект из списка?\nЭто не удалит файлы с диска.\n\n"+selectedProjectPath),
+			func(confirmed bool) {
+				if !confirmed {
+					return
+				}
+				if err := wsl.RemoveProject(selectedProjectPath); err != nil {
+					dialog.ShowError(err, win)
+					return
+				}
+				selectedProjectPath = ""
+				entryPath.SetText(wsl.GetActiveProjectPath())
+				entryProjectName.SetText("")
+				updateProjectsList()
+				dialog.ShowCustom("Удалено", "ОК", widget.NewLabel("Проект удалён из списка"), win)
+			},
+			win,
+		)
+		confirmDialog.Show()
+	}
+
+	btnRenameProject.OnTapped = func() {
+		if selectedProjectPath == "" {
+			dialog.ShowInformation("Не выбрано", "Выберите проект для переименования.", win)
+			return
+		}
+
+		renameEntry := widget.NewEntry()
+		renameEntry.SetPlaceHolder("Новое имя проекта")
+		renameEntry.SetText(wsl.ActiveProject().NameWithFallback())
+
+		dlg := dialog.NewCustomConfirm("Переименовать", "Переименовать", "Отмена", renameEntry, func(ok bool) {
+			if !ok || renameEntry.Text == "" {
+				return
+			}
+			if err := wsl.RenameProject(selectedProjectPath, renameEntry.Text); err != nil {
+				dialog.ShowError(err, win)
+				return
+			}
+			updateProjectsList()
+			dialog.ShowCustom("Переименовано", "ОК", widget.NewLabel("Проект переименован"), win)
+		}, win)
+		dlg.Show()
+	}
+
+	projectsList.OnSelected = func(id widget.ListItemID) {
+		projects := wsl.GetProjects()
+		if id < len(projects) {
+			selectedProjectPath = projects[id].Path
+			entryPath.SetText(projects[id].Path)
+			entryProjectName.SetText(projects[id].Name)
+		}
+	}
+	projectsList.OnUnselected = func(id widget.ListItemID) {
+		_ = id
+	}
 
 	entryDistro := makeSettingEntry("Имя WSL-дистрибутива")
 	entryDistro.SetText(config.WslDistro)
@@ -96,28 +235,24 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	checkEconomyMode := widget.NewCheck("Режим экономии ресурсов", nil)
 	checkEconomyMode.SetChecked(config.EconomyMode)
 
-	// Лимиты по умолчанию для контейнеров
 	entryCPU := makeSettingEntry("Лимит CPU (например: 0.5, 1.5, 2)")
 	entryCPU.SetText(config.DefaultCPU)
 
 	entryMemory := makeSettingEntry("Лимит памяти (например: 512m, 1g, 2g)")
 	entryMemory.SetText(config.DefaultMemory)
 
-	// Параллельная сборка
 	entryMaxParallel := makeSettingEntry("Параллельные сборки (0 = без ограничений)")
 	entryMaxParallel.SetText(strconv.Itoa(config.MaxParallelism))
 
 	entryContainerConcurrency := makeSettingEntry("Параллельные операции контейнеров")
 	entryContainerConcurrency.SetText(strconv.Itoa(config.ContainerOperationConcurrency))
 
-	// BuildKit кэш
 	entryBuildkitTTL := makeSettingEntry("Очистка кэша старше (часов, 0 = отключено)")
 	entryBuildkitTTL.SetText(strconv.Itoa(config.BuildkitCacheTTL))
 
 	entryBuildkitSize := makeSettingEntry("Макс. размер кэша (например: 5g, 10g)")
 	entryBuildkitSize.SetText(config.BuildkitMaxSize)
 
-	// Прокси для деплоя
 	proxyRadio := widget.NewRadioGroup([]string{"Traefik + Let's Encrypt", "Cloudflare Tunnel"}, nil)
 	proxyRadio.Horizontal = true
 	proxyRadio.SetSelected(deploymentProxyUIValue(config.DeploymentProxy))
@@ -127,7 +262,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	proxyHint := widget.NewLabel("💡 Traefik — бесплатный SSL через Let's Encrypt; Cloudflare — через Tunnel, без открытых портов")
 	proxyHint.TextStyle = fyne.TextStyle{Italic: true}
 
-	// Имена сервисов и порты для деплоя
 	entryBackendService := makeSettingEntry("Имя сервиса backend (в docker-compose.yml)")
 	entryBackendService.SetText(config.DeployServiceBackend)
 	if config.DeployServiceBackend == "" {
@@ -166,7 +300,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	serviceHint := widget.NewLabel("💡 Должны совпадать с именами сервисов и портами внутри docker-compose.yml")
 	serviceHint.TextStyle = fyne.TextStyle{Italic: true}
 
-	// Настройки сборки
 	checkSquash := widget.NewCheck("Объединить слои (--squash)", nil)
 	checkSquash.SetChecked(config.SquashLayers)
 
@@ -177,7 +310,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	compressionLevel := widget.NewSlider(1, 9)
 	compressionLevel.SetValue(float64(config.CompressionLevel))
 	compressionLevel.Step = 1
-	// Устанавливаем начальное состояние в зависимости от выбранного алгоритма
 	if config.Compression == "gzip" || config.Compression == "zstd" {
 		compressionLevel.Enable()
 	} else {
@@ -197,17 +329,15 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		}
 	}
 
-	// Кнопки
 	btnOpenExplorer := widget.NewButton("📁 Открыть проводник", nil)
 	btnCheckPath := widget.NewButton("✅ Проверить путь", nil)
 	btnDetect := widget.NewButton("🔍 Автоопределение", nil)
 	btnSave := widget.NewButton("💾 Сохранить", nil)
 	btnReset := widget.NewButton("🔄 Сбросить", nil)
 
-	// Обновление UI после загрузки или сброса
 	updateUI := func() {
 		cfg, _ := wsl.LoadConfig()
-		entryPath.SetText(cfg.ProjectPath)
+		entryPath.SetText(wsl.GetActiveProjectPath())
 		entryDistro.SetText(cfg.WslDistro)
 		entryCdPort.SetText(strconv.Itoa(cfg.CdPort))
 		entryCdNamespace.SetText(cfg.CdNamespace)
@@ -246,7 +376,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		entryDeployNetwork.SetText(cfg.DeployNetwork)
 	}
 
-	// Обработчики кнопок
 	btnOpenExplorer.OnTapped = func() {
 		go func() {
 			select {
@@ -254,7 +383,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				return
 			default:
 			}
-			// Открываем домашнюю директорию пользователя — она переносима
 			cmd := exec.Command("explorer.exe")
 			cmd.Start()
 		}()
@@ -267,17 +395,14 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			return
 		}
 
-		// Нормализуем путь
 		path = filepath.Clean(path)
 
-		// Проверяем существование папки через os.Stat (работает с UTF-8, пробелами, кириллицей)
 		dirInfo, err := os.Stat(path)
 		if err != nil || !dirInfo.IsDir() {
 			dialog.ShowCustom("Ошибка", "ОК", widget.NewLabel(fmt.Sprintf("Папка не найдена: %s\n%s", path, err)), win)
 			return
 		}
 
-		// Проверяем наличие docker-compose.yml или compose.yaml
 		composeExists := false
 		composeFiles := []string{"compose.yaml", "docker-compose.yml"}
 		for _, name := range composeFiles {
@@ -333,7 +458,14 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		cfg, _ := wsl.LoadConfig()
 
 		if entryPath.Text != "" {
-			cfg.ProjectPath = entryPath.Text
+			path := filepath.Clean(entryPath.Text)
+			if err := wsl.AddProject(path); err != nil {
+				if setErr := wsl.SetActiveProject(path); setErr != nil {
+					dialog.ShowError(setErr, win)
+					return
+				}
+			}
+			entryPath.SetText(path)
 		}
 		if distro := entryDistro.Text; distro != "" {
 			cfg.WslDistro = distro
@@ -378,7 +510,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		}
 		cfg.EconomyMode = checkEconomyMode.Checked
 
-		// Лимиты контейнеров
 		cfg.DefaultCPU = entryCPU.Text
 		cfg.DefaultMemory = entryMemory.Text
 
@@ -455,7 +586,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		confirmDialog.Show()
 	}
 
-	// Информация
 	infoText := "Здесь можно настроить все параметры приложения.\n\n" +
 		"📁 Путь к проекту — откройте проводник, скопируйте путь и вставьте в поле\n" +
 		"✅ Проверить путь — проверит существование папки и наличие docker-compose.yml\n" +
@@ -474,8 +604,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	infoLabel := widget.NewLabel(infoText)
 	infoLabel.Wrapping = fyne.TextTruncate
 
-	// ----- Карточки -----
-	// 1. Основные настройки
 	basicCard := widget.NewCard("Основные настройки", "",
 		container.NewVBox(
 			widget.NewLabelWithStyle("Путь к проекту", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -519,7 +647,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
-	// 2. Настройки сборки образов
 	buildCard := widget.NewCard("Настройки сборки образов", "",
 		container.NewVBox(
 			checkSquash,
@@ -533,7 +660,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
-	// 2b. Лимиты по умолчанию для контейнеров
 	cpuHint := widget.NewLabel("💡 0.5 = 50% CPU, 2 = 2 ядра")
 	cpuHint.TextStyle = fyne.TextStyle{Italic: true}
 	memoryHint := widget.NewLabel("💡 512m = 512 МБ, 1g = 1 ГБ, оставьте пустым для без лимита")
@@ -545,7 +671,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	buildkitSizeLimit := widget.NewLabel("💡 5g = 5 ГБ, 10g = 10 ГБ, оставьте пустым для без лимита")
 	buildkitSizeLimit.TextStyle = fyne.TextStyle{Italic: true}
 
-	// 2c. Прокси для деплоя
 	proxyCard := widget.NewCard("Прокси для деплоя", "",
 		container.NewVBox(
 			proxyRadio,
@@ -553,7 +678,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
-	// 2d. Имена сервисов для деплоя
 	serviceCard := widget.NewCard("Имена сервисов", "Должны совпадать с именами в docker-compose.yml",
 		container.NewVBox(
 			widget.NewLabelWithStyle("Имя сервиса backend", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -606,7 +730,20 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
-	// 3. Управление и информация
+	projectCard := widget.NewCard("Управление проектами", "Добавляйте, удаляйте и переключайтесь между проектами",
+		container.NewVBox(
+			widget.NewLabelWithStyle("Активный проект", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.NewVBox(
+				makeSettingRow(entryPath),
+				container.NewHBox(btnAddProject, btnRemoveProject, btnRenameProject),
+				widget.NewSeparator(),
+			),
+			widget.NewLabelWithStyle("Список проектов", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.NewMax(projectsList),
+			widget.NewLabel("💡 Нажмите на проект в списке для переключения. Выбранный проект будет использоваться по умолчанию."),
+		),
+	)
+
 	actionsCard := widget.NewCard("Управление", "",
 		container.NewVBox(
 			container.NewHBox(btnSave, btnReset),
@@ -616,13 +753,13 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
-	// Собираем всё с небольшими отступами
 	content := container.NewVBox(
 		container.NewPadded(basicCard),
 		container.NewPadded(buildCard),
 		container.NewPadded(proxyCard),
 		container.NewPadded(serviceCard),
 		container.NewPadded(limitCard),
+		container.NewPadded(projectCard),
 		container.NewPadded(actionsCard),
 	)
 

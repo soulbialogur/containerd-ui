@@ -54,7 +54,6 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 
 	refresh := func() {
 		go func() {
-			// Проверяем контекст приложения
 			select {
 			case <-wsl.AppContext().Done():
 				return
@@ -82,7 +81,6 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 			dialog.ShowConfirm("Удаление образа", fmt.Sprintf("Удалить образ %s?", selectedID), func(ok bool) {
 				if ok {
 					go func() {
-						// Проверяем контекст приложения
 						select {
 						case <-wsl.AppContext().Done():
 							return
@@ -90,7 +88,7 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 						}
 
 						wsl.RemoveImage(selectedID)
-						wsl.ClearImageSizeCache() // очищаем кэш размеров
+						wsl.ClearImageSizeCache()
 						data, err := wsl.ListImages()
 						if err == nil {
 							images = data

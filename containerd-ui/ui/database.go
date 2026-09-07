@@ -24,13 +24,12 @@ func BuildDatabaseTab() fyne.CanvasObject {
 
 	btnCheck := widget.NewButton("Проверить", func() {
 		go func() {
-			// Проверяем контекст приложения
 			select {
 			case <-wsl.AppContext().Done():
 				return
 			default:
 			}
-			
+
 			size, dbFiles, err := wsl.GetDBInfo(volName)
 			if err == nil {
 				lblSize.SetText("Размер: " + size)

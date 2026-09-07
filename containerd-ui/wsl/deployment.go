@@ -136,7 +136,6 @@ func DeployDomain(ctx context.Context, domain, backendPrefix string, publishBack
 		return "", err
 	}
 
-	// Проверяем порты для Traefik
 	proxy := GetDeploymentProxy()
 	if proxy == "traefik" {
 		port80, port443, err := CheckPorts(ctx)
@@ -151,7 +150,7 @@ func DeployDomain(ctx context.Context, domain, backendPrefix string, publishBack
 			if !port443 {
 				busy = append(busy, "443")
 			}
-			return "", fmt.Errorf("порты %s заняты. Освободите их перед деплоем Traefik.\n\n💡 Проверить: кнопка «Проверить порты 80/443»\n💡 Остановить: sudo systemctl stop nginx apache2", strings.Join(busy, ", "))
+			return "", fmt.Errorf("порты %s заняты. Освободите их перед деплоем Traefik. Конфликт может быть в WSL или на Windows (например, IIS).\n\n💡 Проверить: кнопка «Проверить порты 80/443»\n💡 Остановить в WSL: sudo systemctl stop nginx apache2\n💡 Если порт занят Windows-службой, освободите его в Windows или выберите прокси Cloudflare Tunnel", strings.Join(busy, ", "))
 		}
 	}
 
@@ -176,10 +175,8 @@ func DeployDomain(ctx context.Context, domain, backendPrefix string, publishBack
 		proxyOutput = output
 	}
 
-	// Запускаем сервисы только после успешного запуска прокси
 	serviceOutput, err := ensureDeploymentServices(ctx, projectPath, publishBackend, publishFrontend)
 	if err != nil {
-		// Если сервисы не запустились, останавливаем прокси
 		_, rollbackErr := RollbackDomain(ctx)
 		if rollbackErr != nil {
 			return "", fmt.Errorf("ошибка запуска сервисов: %w\n(откат прокси также не удался: %v)", err, rollbackErr)
@@ -368,10 +365,6 @@ func deployWithCloudflare(ctx context.Context, projectPath, domain, backendPrefi
 	return strings.TrimSpace(composeOutput), nil
 }
 
-// CheckPorts проверяет, свободны ли порты 80 и 443 в WSL.
-// Дополнительно делаем TCP dial на localhost:port, потому что ss внутри WSL
-// не видит сервисы, которые слушают порты на уровне Windows (например, IIS),
-// а Traefik всё равно не сможет стартовать на таких портах.
 func CheckPorts(ctx context.Context) (port80, port443 bool, err error) {
 	command := "ss -tlnp 2>/dev/null | grep -E ':(80|443) ' || echo 'PORTS_FREE'"
 	output, err := RunWSLWithCancel(ctx, command)
@@ -419,7 +412,6 @@ func isLocalPortOccupied(host string, port int) bool {
 	return true
 }
 
-// ValidateCloudflareCredentials проверяет, что JSON-токен соответствует реальному Account/Tunnel credential.
 func ValidateCloudflareCredentials(projectPath string) error {
 	credentialsPath := filepath.Join(projectPath, ".containerd-data", "cloudflare", "credentials.json")
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
@@ -442,14 +434,12 @@ func ValidateCloudflareCredentials(projectPath string) error {
 	return nil
 }
 
-// SaveCloudflareToken записывает токен Cloudflare Tunnel в credentials.json
 func SaveCloudflareToken(projectPath, tokenJSON string) error {
 	cfDir := filepath.Join(projectPath, ".containerd-data", "cloudflare")
 	if err := os.MkdirAll(cfDir, 0700); err != nil {
 		return fmt.Errorf("не удалось создать каталог Cloudflare: %w", err)
 	}
 
-	// Валидируем JSON
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(tokenJSON), &parsed); err != nil {
 		return fmt.Errorf("некорректный JSON токен: %w", err)
@@ -466,12 +456,10 @@ func SaveCloudflareToken(projectPath, tokenJSON string) error {
 	return nil
 }
 
-// CheckCloudflareToken проверяет наличие credentials.json
 func CheckCloudflareToken(projectPath string) error {
 	return ValidateCloudflareCredentials(projectPath)
 }
 
-// CheckDeploymentPrerequisites проверяет наличие необходимых инструментов в WSL
 func CheckDeploymentPrerequisites(ctx context.Context) error {
 	var missing []string
 
@@ -545,9 +533,6 @@ func ensureDeploymentNetwork(ctx context.Context) error {
 func validateProjectComposeNetworkFromText(text string) error {
 	networkName := GetDeployNetwork()
 
-	// Это эвристическая проверка, а не полноценный YAML-парсер.
-	// Для этого достаточно стандартных сервисных блоков, но YAML-якоря/многострочные эквиваленты
-	// могут не проходить строковый поиск даже при корректной конфигурации.
 	if !strings.Contains(text, networkName) {
 		return fmt.Errorf("Compose-файл проекта не подключён к сети %q. Добавьте сеть %q и подключите backend/frontend к ней, иначе Traefik/Cloudflare не смогут обращаться к сервисам по имени.", networkName, networkName)
 	}
@@ -645,8 +630,6 @@ func buildTraefikDynamicConfig(domain, backendPrefix string, backend, frontend, 
 
 	var middlewares []string
 	if backend && backendPrefix != "/" {
-		// Создаём middleware для удаления префикса /api, /backend и т.п.
-		// Убираем ведущий слэш для имени middleware
 		name := strings.TrimPrefix(backendPrefix, "/")
 		if name == "" {
 			name = "root"
@@ -717,7 +700,6 @@ networks:
 		name: {{ .Network }}
 `
 
-// renderCloudflareConfig генерирует config.json для cloudflared
 func renderCloudflareConfig(domain, backendPrefix string, backend, frontend bool) (string, error) {
 	configTemplate, err := template.New("cloudflare-config").Parse(cloudflareConfigTemplate)
 	if err != nil {
@@ -749,7 +731,6 @@ func renderCloudflareConfig(domain, backendPrefix string, backend, frontend bool
 	return rendered.String(), nil
 }
 
-// renderCloudflareCompose возвращает compose-файл для cloudflared
 func renderCloudflareCompose() (string, error) {
 	composeTemplate, err := template.New("cloudflare-compose").Parse(cloudflareComposeTemplate)
 	if err != nil {
@@ -816,9 +797,6 @@ const cloudflareConfigTemplate = `{
     }
   ]
 }`
-
-// Note: Cloudflare Tunnel не поддерживает stripPrefix в ingress.
-// Бэкенд должен обрабатывать пути с префиксом. Для автоматического удаления используйте Traefik.
 
 const cloudflareComposeTemplate = `services:
   cloudflared:

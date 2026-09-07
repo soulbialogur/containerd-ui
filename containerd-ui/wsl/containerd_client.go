@@ -26,18 +26,12 @@ const (
 	maxRetries           = 5
 )
 
-// Константы таймаутов
 const (
 	TimeoutFast   = 2 * time.Second
 	TimeoutMedium = 5 * time.Second
 	TimeoutSlow   = 15 * time.Second
 )
 
-// ---------------------------------------------------------------------------
-// ТИПИЗИРОВАННЫЕ КЭШИ
-// ---------------------------------------------------------------------------
-
-// typedCache — типизированный кэш без interface{}
 type typedCache[T any] struct {
 	sync.RWMutex
 	data      T
@@ -74,7 +68,6 @@ func (c *typedCache[T]) Invalidate() {
 	c.Unlock()
 }
 
-// boundedTypedCache — кэш с ограничением по размеру и количеству записей
 const maxBoundedCacheBytes = 5 * 1024 * 1024
 
 type boundedTypedCache[T any] struct {
@@ -100,12 +93,10 @@ func newBoundedTypedCache[T any](ttl time.Duration, maxEntries int) *boundedType
 func (c *boundedTypedCache[T]) GetWithKey(key string) (T, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
 	if !c.valid || time.Since(c.timestamp) >= c.ttl {
 		var zero T
 		return zero, false
 	}
-
 	if val, ok := c.data[key]; ok {
 		return val, true
 	}
@@ -116,13 +107,11 @@ func (c *boundedTypedCache[T]) GetWithKey(key string) (T, bool) {
 func (c *boundedTypedCache[T]) SetWithKey(key string, value T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	if !c.valid || time.Since(c.timestamp) >= c.ttl {
 		c.data = make(map[string]T, c.maxEntries)
 		c.valid = true
 		c.timestamp = time.Now()
 	}
-
 	valSize := int64(0)
 	switch v := any(value).(type) {
 	case string:
@@ -132,10 +121,8 @@ func (c *boundedTypedCache[T]) SetWithKey(key string, value T) {
 	default:
 		valSize = 64
 	}
-
 	c.data[key] = value
 	c.totalSize += valSize
-
 	for (len(c.data) > c.maxEntries || c.totalSize > c.maxSize) && len(c.data) > 0 {
 		var oldestKey string
 		for k := range c.data {
@@ -164,16 +151,11 @@ func (c *boundedTypedCache[T]) Invalidate() {
 	c.mu.Unlock()
 }
 
-// ---------------------------------------------------------------------------
-// КЭШ СТРОК (для boundedStringCache)
-// ---------------------------------------------------------------------------
-
 type stringCacheEntry struct {
 	value     string
 	timestamp time.Time
 }
 
-// boundedStringCache — кэш строк с TTL и ограничением по количеству
 type boundedStringCache struct {
 	mu         sync.RWMutex
 	data       map[string]stringCacheEntry
@@ -192,7 +174,6 @@ func newBoundedStringCache(defaultTTL time.Duration, maxEntries int) *boundedStr
 func (c *boundedStringCache) Get(key string) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
 	entry, ok := c.data[key]
 	if !ok {
 		return "", false
@@ -206,14 +187,12 @@ func (c *boundedStringCache) Get(key string) (string, bool) {
 func (c *boundedStringCache) Set(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	now := time.Now()
 	for k, entry := range c.data {
 		if now.Sub(entry.timestamp) >= c.defaultTTL {
 			delete(c.data, k)
 		}
 	}
-
 	for len(c.data) >= c.maxEntries {
 		var oldestKey string
 		var oldestTime time.Time
@@ -227,7 +206,6 @@ func (c *boundedStringCache) Set(key, value string) {
 			delete(c.data, oldestKey)
 		}
 	}
-
 	c.data[key] = stringCacheEntry{
 		value:     value,
 		timestamp: now,
@@ -239,10 +217,6 @@ func (c *boundedStringCache) Invalidate() {
 	c.data = make(map[string]stringCacheEntry, c.maxEntries)
 	c.mu.Unlock()
 }
-
-// ---------------------------------------------------------------------------
-// КЭШ СТАТУСОВ КОНТЕЙНЕРОВ
-// ---------------------------------------------------------------------------
 
 type containerStatusStore struct {
 	mu     sync.RWMutex
@@ -303,13 +277,7 @@ func (c *containerStatusStore) invalidateAll() {
 	c.mu.Unlock()
 }
 
-const (
-	statusCacheTTL = 15 * time.Second
-)
-
-// ---------------------------------------------------------------------------
-// ГЛОБАЛЬНЫЕ КЭШИ
-// ---------------------------------------------------------------------------
+const statusCacheTTL = 15 * time.Second
 
 var (
 	containersCache      = newTypedCache[[]Container](3 * time.Second)
@@ -321,10 +289,6 @@ var (
 	splitImageCache = newBoundedTypedCache[[2]string](30*time.Second, 500)
 	humanSizeCache  = newBoundedTypedCache[string](1*time.Minute, 500)
 )
-
-// ---------------------------------------------------------------------------
-// ПОДКЛЮЧЕНИЕ К CONTAINERD
-// ---------------------------------------------------------------------------
 
 var (
 	cdClient    *cdclient.Client
@@ -357,7 +321,6 @@ func setIdleDaemonThreshold(minutes int) {
 	idleStopThreshold = 2 * time.Minute
 }
 
-// SetIdleDaemonThresholdForRuntime применяет таймаут автопаузы без перезапуска UI.
 func SetIdleDaemonThresholdForRuntime(minutes int) {
 	setIdleDaemonThreshold(minutes)
 }
@@ -398,7 +361,6 @@ func stopIdleDaemon() error {
 	return nil
 }
 
-// DetectWSLIP возвращает IP-адрес WSL2
 func DetectWSLIP() string {
 	return detectWSLIP(true)
 }
@@ -414,7 +376,6 @@ func detectWSLIP(forceRefresh bool) string {
 		cdIPValid.Store(false)
 		return ""
 	}
-
 	fields := strings.Fields(strings.TrimSpace(string(out)))
 	if len(fields) > 0 {
 		newIP := fields[0]
@@ -425,7 +386,6 @@ func detectWSLIP(forceRefresh bool) string {
 		}
 		return cdIP
 	}
-
 	cdIPValid.Store(false)
 	return ""
 }
@@ -433,14 +393,12 @@ func detectWSLIP(forceRefresh bool) string {
 func resetCDClient() {
 	cdMu.Lock()
 	defer cdMu.Unlock()
-
 	if cdConn != nil {
 		if !cdAvailable.Load() {
 			cdConn.Close()
 			cdConn = nil
 		}
 	}
-
 	cdClient = nil
 	cdErr = nil
 	cdAvailable.Store(false)
@@ -450,7 +408,6 @@ func getCDClient() (*cdclient.Client, error) {
 	if cdClient != nil && cdAvailable.Load() {
 		return cdClient, nil
 	}
-
 	ip := detectWSLIP(false)
 	if ip == "" {
 		ip = detectWSLIP(true)
@@ -459,14 +416,12 @@ func getCDClient() (*cdclient.Client, error) {
 		cdErr = fmt.Errorf("не удалось определить IP WSL2")
 		return nil, cdErr
 	}
-
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		select {
 		case <-appCtx.Done():
 			return nil, appCtx.Err()
 		default:
 		}
-
 		addr := fmt.Sprintf("%s:%d", ip, GetCdPort())
 		conn, err := grpc.NewClient(addr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -482,7 +437,6 @@ func getCDClient() (*cdclient.Client, error) {
 			}
 			continue
 		}
-
 		client, err := cdclient.NewWithConn(conn,
 			cdclient.WithDefaultNamespace(GetCdNamespace()),
 		)
@@ -498,7 +452,6 @@ func getCDClient() (*cdclient.Client, error) {
 			}
 			continue
 		}
-
 		cdMu.Lock()
 		if cdClient != nil && cdAvailable.Load() {
 			cdMu.Unlock()
@@ -506,32 +459,26 @@ func getCDClient() (*cdclient.Client, error) {
 			conn.Close()
 			return cdClient, nil
 		}
-
 		if cdConn != nil && cdConn != conn {
 			cdConn.Close()
 		}
-
 		cdConn = conn
 		cdClient = client
 		cdErr = nil
 		cdAvailable.Store(true)
 		cdMu.Unlock()
-
 		return cdClient, nil
 	}
-
 	if cdErr == nil {
 		cdErr = fmt.Errorf("не удалось подключиться к containerd после %d попыток", maxRetries)
 	}
 	return nil, cdErr
 }
 
-// Shutdown закрывает соединение
 func Shutdown() {
 	if appCancel != nil {
 		appCancel()
 	}
-
 	cdMu.Lock()
 	if cdConn != nil {
 		cdConn.Close()
@@ -541,11 +488,9 @@ func Shutdown() {
 	cdErr = nil
 	cdAvailable.Store(false)
 	cdMu.Unlock()
-
 	cdIPValid.Store(false)
 }
 
-// AppContext возвращает глобальный контекст
 func AppContext() context.Context {
 	return appCtx
 }
@@ -554,7 +499,6 @@ func cdCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(cdBaseCtx, timeout)
 }
 
-// CDCheck проверяет доступность containerd
 func CDCheck() error {
 	if cdAvailable.Load() {
 		return nil
@@ -572,11 +516,6 @@ func CDCheck() error {
 	return err
 }
 
-// ---------------------------------------------------------------------------
-// ПОЛУЧЕНИЕ КОНФИГУРАЦИИ КОНТЕЙНЕРА (gRPC)
-// ---------------------------------------------------------------------------
-
-// ContainerConfig хранит конфигурацию контейнера для пересоздания
 type ContainerConfig struct {
 	ID      string
 	Name    string
@@ -589,7 +528,6 @@ type ContainerConfig struct {
 	Cmd     string
 }
 
-// CDGetContainerConfig получает конфигурацию через gRPC
 func CDGetContainerConfig(id string) (*ContainerConfig, error) {
 	client, err := getCDClient()
 	if err != nil {
@@ -597,17 +535,14 @@ func CDGetContainerConfig(id string) (*ContainerConfig, error) {
 	}
 	ctx, cancel := cdCtx(TimeoutSlow)
 	defer cancel()
-
 	container, err := client.LoadContainer(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось загрузить контейнер %s: %w", id, err)
 	}
-
 	info, err := container.Info(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось получить информацию о контейнере: %w", err)
 	}
-
 	name := info.Labels["nerdctl/name"]
 	if name == "" {
 		name = id
@@ -618,11 +553,9 @@ func CDGetContainerConfig(id string) (*ContainerConfig, error) {
 		Image:  info.Image,
 		Labels: make(map[string]string),
 	}
-
 	for k, v := range info.Labels {
 		config.Labels[k] = v
 	}
-
 	if config.Image == "" {
 		if img, ok := info.Labels["nerdctl/image"]; ok {
 			config.Image = img
@@ -643,15 +576,9 @@ func CDGetContainerConfig(id string) (*ContainerConfig, error) {
 	if volumes, ok := info.Labels["nerdctl/volumes"]; ok {
 		config.Volumes = strings.Split(volumes, "\n")
 	}
-
 	return config, nil
 }
 
-// ---------------------------------------------------------------------------
-// СТАТИСТИКА КОНТЕЙНЕРОВ (JSON формат — надёжно)
-// ---------------------------------------------------------------------------
-
-// ContainerStatJSON структура для JSON-парсинга nerdctl stats
 type ContainerStatJSON struct {
 	ID       string `json:"ID"`
 	Name     string `json:"Name"`
@@ -661,48 +588,36 @@ type ContainerStatJSON struct {
 	PIDs     string `json:"PIDs"`
 }
 
-// CDGetStats получает статистику через nerdctl stats с JSON форматом
 func CDGetStats() ([]ContainerStat, error) {
 	if cached, ok := statsCache.Get(); ok {
 		GlobalCacheManager.RecordHit("stats")
 		return cached, nil
 	}
 	GlobalCacheManager.RecordMiss("stats")
-
-	// Используем --format '{{json .}}' вместо текстового парсинга
 	out, err := RunWSL("nerdctl stats --no-stream --format '{{json .}}' 2>/dev/null")
 	if err != nil || out == "" {
 		GlobalCacheManager.RecordError("stats")
 		return []ContainerStat{}, nil
 	}
-
 	lines := strings.Split(out, "\n")
 	var result []ContainerStat
-
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-
-		// Парсим JSON — надёжно и не зависит от формата вывода
 		var stat ContainerStatJSON
 		if err := json.Unmarshal([]byte(line), &stat); err != nil {
-			continue // пропускаем ошибочные строки
+			continue
 		}
-
-		// Обрабатываем ID
 		id := stat.ID
 		if len(id) > 12 {
 			id = id[:12]
 		}
-
-		// Обрабатываем PIDs
 		pids := stat.PIDs
 		if pids == "0" {
 			pids = "—"
 		}
-
 		result = append(result, ContainerStat{
 			ID:     id,
 			Name:   stat.Name,
@@ -712,22 +627,16 @@ func CDGetStats() ([]ContainerStat, error) {
 			PIDs:   pids,
 		})
 	}
-
 	statsCache.Set(result)
 	return result, nil
 }
 
-// ---------------------------------------------------------------------------
-// ЛОГИ КОНТЕЙНЕРА (чтение из файловой системы)
-// ---------------------------------------------------------------------------
-
-// CDGetContainerLogs читает логи через find + tail (WSL)
 func CDGetContainerLogs(id string, tail int) (string, error) {
 	ns := GetCdNamespace()
 	pattern := fmt.Sprintf("/var/lib/nerdctl/%s/containers/%s*", ns, id)
 	out, err := RunWSL(fmt.Sprintf(
-		"logfile=$(find %s -name '*.log' 2>/dev/null | head -1); if [ -n \"$logfile\" ]; then tail -n %d \"$logfile\" 2>&1; else echo 'NO_LOGS_FOUND'; fi",
-		pattern, tail,
+		"logfile=$(find %s -name '*.log' 2>/dev/null | head -1); if [ -n \"$logfile\" ]; then tail -n %d \"%s\" 2>&1; else echo 'NO_LOGS_FOUND'; fi",
+		shellQuote(pattern), tail, shellQuote(pattern),
 	))
 	if err != nil {
 		return "", err
@@ -738,22 +647,16 @@ func CDGetContainerLogs(id string, tail int) (string, error) {
 	return out, nil
 }
 
-// CDClearContainerLogs очищает лог-файл
 func CDClearContainerLogs(id string) error {
 	ns := GetCdNamespace()
 	pattern := fmt.Sprintf("/var/lib/nerdctl/%s/containers/%s*", ns, id)
 	_, err := RunWSL(fmt.Sprintf(
 		"logfile=$(find %s -name '*.log' 2>/dev/null | head -1); [ -n \"$logfile\" ] && truncate -s 0 \"$logfile\" 2>/dev/null",
-		pattern,
+		shellQuote(pattern),
 	))
 	return err
 }
 
-// ---------------------------------------------------------------------------
-// ИНФОРМАЦИЯ О ТОМЕ (gRPC для поиска + WSL для размера)
-// ---------------------------------------------------------------------------
-
-// CDGetDBInfo получает размер и список файлов тома
 func CDGetDBInfo(volumeName string) (string, []string, error) {
 	client, err := getCDClient()
 	if err != nil {
@@ -761,13 +664,11 @@ func CDGetDBInfo(volumeName string) (string, []string, error) {
 	}
 	ctx, cancel := cdCtx(TimeoutMedium)
 	defer cancel()
-
 	store := client.ContainerService()
 	containers, err := store.List(ctx)
 	if err != nil {
 		return cdGetDBInfoFallback(volumeName)
 	}
-
 	var mountpoint string
 	for _, c := range containers {
 		if _, ok := c.Labels["nerdctl/volume."+volumeName]; ok {
@@ -780,17 +681,14 @@ func CDGetDBInfo(volumeName string) (string, []string, error) {
 		ns := GetCdNamespace()
 		mountpoint = "/var/lib/nerdctl/" + ns + "/volumes/" + volumeName + "/_data"
 	}
-
 	out, err := RunWSL(fmt.Sprintf(
 		"du -sh %s 2>/dev/null; echo '===FILES==='; find %s -type f 2>/dev/null | head -50",
-		mountpoint, mountpoint,
+		shellQuote(mountpoint), shellQuote(mountpoint),
 	))
 	if err != nil {
 		return "", nil, err
 	}
-
 	parts := strings.SplitN(out, "===FILES===", 2)
-
 	size := "—"
 	if len(parts) > 0 {
 		fields := strings.Fields(strings.TrimSpace(parts[0]))
@@ -798,7 +696,6 @@ func CDGetDBInfo(volumeName string) (string, []string, error) {
 			size = fields[0]
 		}
 	}
-
 	var files []string
 	if len(parts) > 1 {
 		for _, line := range strings.Split(parts[1], "\n") {
@@ -808,7 +705,6 @@ func CDGetDBInfo(volumeName string) (string, []string, error) {
 			}
 		}
 	}
-
 	return size, files, nil
 }
 
@@ -817,13 +713,12 @@ func cdGetDBInfoFallback(volumeName string) (string, []string, error) {
 	mp := "/var/lib/nerdctl/" + ns + "/volumes/" + volumeName + "/_data"
 	out, err := RunWSL(fmt.Sprintf(
 		"du -sh %s 2>/dev/null; echo '===FILES==='; find %s -type f 2>/dev/null | head -50",
-		mp, mp,
+		shellQuote(mp), shellQuote(mp),
 	))
 	if err != nil {
 		return "", nil, err
 	}
 	parts := strings.SplitN(out, "===FILES===", 2)
-
 	size := "—"
 	if len(parts) > 0 {
 		fields := strings.Fields(strings.TrimSpace(parts[0]))
@@ -831,7 +726,6 @@ func cdGetDBInfoFallback(volumeName string) (string, []string, error) {
 			size = fields[0]
 		}
 	}
-
 	var files []string
 	if len(parts) > 1 {
 		for _, line := range strings.Split(parts[1], "\n") {
@@ -844,11 +738,6 @@ func cdGetDBInfoFallback(volumeName string) (string, []string, error) {
 	return size, files, nil
 }
 
-// ---------------------------------------------------------------------------
-// СПИСКИ КОНТЕЙНЕРОВ, ОБРАЗОВ, ТОМОВ
-// ---------------------------------------------------------------------------
-
-// CDListContainers с кэшем и batch-режимом
 func CDListContainers(all bool) ([]Container, error) {
 	if cached, ok := containersCache.Get(); ok {
 		if all {
@@ -862,12 +751,10 @@ func CDListContainers(all bool) ([]Container, error) {
 		}
 		return running, nil
 	}
-
 	client, err := getCDClient()
 	if err == nil {
 		ctx, cancel := cdCtx(TimeoutMedium)
 		defer cancel()
-
 		store := client.ContainerService()
 		list, err := store.List(ctx)
 		if err == nil {
@@ -878,11 +765,9 @@ func CDListContainers(all bool) ([]Container, error) {
 					status = determineContainerStatus(client, ctx, c.ID)
 					containerStatusCache.set(c.ID, status)
 				}
-
 				if !all && !isContainerRunning(status) {
 					continue
 				}
-
 				result = append(result, normalizeContainer(
 					c.ID,
 					c.Labels["nerdctl/name"],
@@ -891,17 +776,13 @@ func CDListContainers(all bool) ([]Container, error) {
 					c.Labels["nerdctl/ports"],
 				))
 			}
-
 			containersCache.Set(result)
 			return result, nil
 		}
 	}
-
-	// Fallback: используем WSL (nerdctl ps)
 	return listContainersFallback(all)
 }
 
-// listContainersFallback — fallback через WSL, если gRPC недоступен
 func listContainersFallback(all bool) ([]Container, error) {
 	flag := ""
 	if all {
@@ -911,7 +792,6 @@ func listContainersFallback(all bool) ([]Container, error) {
 	if err != nil || out == "" {
 		return []Container{}, nil
 	}
-
 	var result []Container
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -933,7 +813,6 @@ func listContainersFallback(all bool) ([]Container, error) {
 		}
 		result = append(result, normalizeContainer(c.ID, c.Name, c.Image, c.Status, c.Ports))
 	}
-
 	containersCache.Set(result)
 	return result, nil
 }
@@ -953,7 +832,6 @@ func isContainerRunning(status string) bool {
 	return status == "running" || strings.Contains(status, "up")
 }
 
-// determineContainerStatus через gRPC
 func determineContainerStatus(client *cdclient.Client, ctx context.Context, id string) string {
 	container, err := client.LoadContainer(ctx, id)
 	if err != nil {
@@ -981,13 +859,11 @@ func determineContainerStatus(client *cdclient.Client, ctx context.Context, id s
 	}
 }
 
-// getContainerStatusesBatch – один вызов nerdctl ps
 func getContainerStatusesBatch() (map[string]string, error) {
 	out, err := RunWSL("nerdctl ps -a --format '{{.ID}}\t{{.Status}}' 2>/dev/null")
 	if err != nil || out == "" {
 		return nil, err
 	}
-
 	statuses := make(map[string]string)
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -1016,22 +892,18 @@ func getContainerStatusesBatch() (map[string]string, error) {
 	return statuses, nil
 }
 
-// CDListImages – список образов через gRPC с кэшированием размеров
 func CDListImages() ([]Image, error) {
 	if cached, ok := imagesCache.Get(); ok {
 		return cached, nil
 	}
-
 	client, err := getCDClient()
 	if err == nil {
 		ctx, cancel := cdCtx(TimeoutMedium)
 		defer cancel()
-
 		store := client.ImageService()
 		imgs, err := store.List(ctx)
 		if err == nil {
 			result := make([]Image, 0, len(imgs))
-
 			sizeMap := func() map[string]int64 {
 				defer func() { recover() }()
 				return getImageSizes(ctx, imgs)
@@ -1039,7 +911,6 @@ func CDListImages() ([]Image, error) {
 			if sizeMap == nil {
 				sizeMap = make(map[string]int64)
 			}
-
 			for _, img := range imgs {
 				repo, tag := cachedSplitImageRef(img.Name)
 				digest := img.Target.Digest.String()
@@ -1065,23 +936,18 @@ func CDListImages() ([]Image, error) {
 					sizeBytes:  size,
 				})
 			}
-
 			imagesCache.Set(result)
 			return result, nil
 		}
 	}
-
-	// Fallback: используем WSL (nerdctl images)
 	return listImagesFallback()
 }
 
-// listImagesFallback — fallback через WSL, если gRPC недоступен
 func listImagesFallback() ([]Image, error) {
 	out, err := RunWSL("nerdctl images --format '{{json .}}' 2>/dev/null")
 	if err != nil || out == "" {
 		return []Image{}, nil
 	}
-
 	var result []Image
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -1104,16 +970,13 @@ func listImagesFallback() ([]Image, error) {
 			Size:       img.Size,
 		})
 	}
-
 	imagesCache.Set(result)
 	return result, nil
 }
 
-// getImageSizes – batch-загрузка размеров
 func getImageSizes(ctx context.Context, imgs []images.Image) map[string]int64 {
 	defer func() { recover() }()
 	sizeMap := make(map[string]int64, len(imgs))
-
 	imageSizeCache.RLock()
 	for _, img := range imgs {
 		digest := img.Target.Digest.String()
@@ -1122,7 +985,6 @@ func getImageSizes(ctx context.Context, imgs []images.Image) map[string]int64 {
 		}
 	}
 	imageSizeCache.RUnlock()
-
 	for _, img := range imgs {
 		digest := img.Target.Digest.String()
 		if _, ok := sizeMap[digest]; ok {
@@ -1139,7 +1001,6 @@ func getImageSizes(ctx context.Context, imgs []images.Image) map[string]int64 {
 	return sizeMap
 }
 
-// Кэш размеров образов
 const maxImageSizeCacheBytes = 10 * 1024 * 1024
 
 var imageSizeCache = struct {
@@ -1180,7 +1041,6 @@ func addImageSizeWithCleanup(digest string, size int64) {
 	imageSizeCache.Unlock()
 }
 
-// cachedSplitImageRef и cachedHumanSize
 func cachedSplitImageRef(ref string) (string, string) {
 	if val, ok := splitImageCache.GetWithKey(ref); ok {
 		return val[0], val[1]
@@ -1200,19 +1060,16 @@ func cachedHumanSize(size int64) string {
 	return s
 }
 
-// CDListVolumes – список томов (WSL)
 func CDListVolumes() ([]Volume, error) {
 	if cached, ok := volumesCache.Get(); ok {
 		return cached, nil
 	}
-
 	ns := GetCdNamespace()
 	base := "/var/lib/nerdctl/" + ns + "/volumes"
-	out, err := RunWSL("ls -1 " + base + " 2>/dev/null")
+	out, err := RunWSL("ls -1 " + shellQuote(base) + " 2>/dev/null")
 	if err != nil {
 		return nil, nil
 	}
-
 	var result []Volume
 	for _, name := range strings.Split(out, "\n") {
 		name = strings.TrimSpace(name)
@@ -1229,9 +1086,6 @@ func CDListVolumes() ([]Volume, error) {
 	return result, nil
 }
 
-// CDGetUsedVolumes возвращает множество имён томов, используемых хотя бы одним контейнером.
-// Использует gRPC для получения спецификаций контейнеров.
-// Если gRPC недоступен — использует fallback через WSL (nerdctl).
 func CDGetUsedVolumes(ctx context.Context) (map[string]bool, error) {
 	client, err := getCDClient()
 	if err == nil {
@@ -1244,15 +1098,13 @@ func CDGetUsedVolumes(ctx context.Context) (map[string]bool, error) {
 			for _, c := range containers {
 				container, err := client.LoadContainer(cdCtx2, c.ID)
 				if err != nil {
-					continue // пропускаем проблемные контейнеры
+					continue
 				}
 				spec, err := container.Spec(cdCtx2)
 				if err != nil {
 					continue
 				}
-				// Проходим по всем монтированиям
 				for _, mount := range spec.Mounts {
-					// Именованные тома имеют тип "volume", а Source содержит имя тома
 					if mount.Type == "volume" && mount.Source != "" {
 						used[mount.Source] = true
 					}
@@ -1261,21 +1113,15 @@ func CDGetUsedVolumes(ctx context.Context) (map[string]bool, error) {
 			return used, nil
 		}
 	}
-
-	// Fallback: используем WSL (nerdctl ps —v)
 	return getUsedVolumesFallback()
 }
 
-// getUsedVolumesFallback — fallback через WSL, если gRPC недоступен
 func getUsedVolumesFallback() (map[string]bool, error) {
 	used := make(map[string]bool)
-
-	// nerdctl ps --format '{{.ID}}\t{{.Mounts}}'
 	out, err := RunWSL("nerdctl ps -a --format '{{.ID}}\t{{.Mounts}}' 2>/dev/null")
 	if err != nil || out == "" {
 		return used, nil
 	}
-
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -1286,10 +1132,8 @@ func getUsedVolumesFallback() (map[string]bool, error) {
 			continue
 		}
 		mounts := parts[1]
-		// Парсим список монтирований — разделитель запятая
 		for _, m := range strings.Split(mounts, ",") {
 			m = strings.TrimSpace(m)
-			// Формат: volume_name -> /path/to/_data
 			if idx := strings.Index(m, " -> "); idx > 0 {
 				volName := strings.TrimSpace(m[:idx])
 				if volName != "" {
@@ -1298,34 +1142,24 @@ func getUsedVolumesFallback() (map[string]bool, error) {
 			}
 		}
 	}
-
 	return used, nil
 }
 
-// ---------------------------------------------------------------------------
-// ДЕЙСТВИЯ С КОНТЕЙНЕРАМИ И ОБРАЗАМИ (gRPC)
-// ---------------------------------------------------------------------------
-
 func CDStopContainer(id string) error {
-	// ---- Шаг 1: gRPC ----
 	client, err := getCDClient()
 	if err == nil {
 		ctx, cancel := cdCtx(TimeoutSlow)
 		defer cancel()
-
 		container, err := client.LoadContainer(ctx, id)
 		if err == nil {
 			task, err := container.Task(ctx, nil)
 			if err == nil {
-				// Отправляем SIGTERM
 				_ = task.Kill(ctx, syscall.SIGTERM)
 				waitCh, err := task.Wait(ctx)
 				if err == nil {
 					select {
 					case <-waitCh:
-						// завершился штатно
 					case <-time.After(TimeoutMedium):
-						// не успел – убиваем принудительно
 						_ = task.Kill(ctx, syscall.SIGKILL)
 						<-waitCh
 					case <-ctx.Done():
@@ -1334,38 +1168,30 @@ func CDStopContainer(id string) error {
 				}
 				_, err = task.Delete(ctx)
 				if err == nil {
-					return nil // успешно через gRPC
+					return nil
 				}
 			}
 		}
-		// если дошли сюда – gRPC не помог, идём в fallback
 	}
-
-	// ---- Шаг 2: Fallback через WSL (nerdctl) ----
-	_, err = RunWSL("nerdctl stop " + id + " 2>/dev/null")
+	_, err = RunWSL("nerdctl stop " + shellQuote(id) + " 2>/dev/null")
 	return err
 }
 
 func CDStartContainer(id string) error {
-	// ---- Шаг 1: gRPC ----
 	client, err := getCDClient()
 	if err == nil {
 		ctx, cancel := cdCtx(TimeoutSlow)
 		defer cancel()
-
 		container, err := client.LoadContainer(ctx, id)
 		if err == nil {
 			task, err := container.Task(ctx, nil)
 			if err == nil {
 				ts, err := task.Status(ctx)
 				if err == nil && ts.Status == cdclient.Running {
-					return nil // уже запущен
+					return nil
 				}
-				// удаляем старую задачу, если есть
 				_, _ = task.Delete(ctx)
 			}
-
-			// создаём новую задачу
 			labels, _ := container.Labels(ctx)
 			logURI := labels["containerd.io/restart.loguri"]
 			var ioCreator cio.Creator
@@ -1379,19 +1205,15 @@ func CDStartContainer(id string) error {
 			} else {
 				ioCreator = cio.NewCreator()
 			}
-
 			task, err = container.NewTask(ctx, ioCreator)
 			if err == nil {
 				if err := task.Start(ctx); err == nil {
-					return nil // успешно запущен через gRPC
+					return nil
 				}
 			}
 		}
-		// gRPC не удался – fallback
 	}
-
-	// ---- Шаг 2: Fallback через WSL (nerdctl) ----
-	_, err = RunWSL("nerdctl start " + id + " 2>/dev/null")
+	_, err = RunWSL("nerdctl start " + shellQuote(id) + " 2>/dev/null")
 	return err
 }
 
@@ -1409,7 +1231,6 @@ func CDRemoveContainer(id string) error {
 	}
 	ctx, cancel := cdCtx(TimeoutSlow)
 	defer cancel()
-
 	container, err := client.LoadContainer(ctx, id)
 	if err != nil {
 		return err
@@ -1426,7 +1247,6 @@ func CDRemoveImage(ref string) error {
 	if err == nil {
 		ctx, cancel := cdCtx(TimeoutSlow)
 		defer cancel()
-
 		store := client.ImageService()
 		img, err := store.Get(ctx, ref)
 		if err == nil {
@@ -1442,22 +1262,16 @@ func CDRemoveImage(ref string) error {
 			}
 		}
 	}
-
-	// Fallback: используем WSL (nerdctl rmi)
-	_, err = RunWSL("nerdctl rmi -f " + ref + " 2>/dev/null")
+	_, err = RunWSL("nerdctl rmi -f " + shellQuote(ref) + " 2>/dev/null")
 	return err
 }
 
 func CDRemoveVolume(name string) error {
 	ns := GetCdNamespace()
 	base := "/var/lib/nerdctl/" + ns + "/volumes/" + name
-	_, err := RunWSL("rm -rf " + base)
+	_, err := RunWSL("rm -rf " + shellQuote(base))
 	return err
 }
-
-// ---------------------------------------------------------------------------
-// ОЧИСТКА СИСТЕМЫ (gRPC + WSL)
-// ---------------------------------------------------------------------------
 
 func CDCleanSystem() (string, error) {
 	client, err := getCDClient()
@@ -1466,7 +1280,6 @@ func CDCleanSystem() (string, error) {
 	}
 	ctx, cancel := cdCtx(TimeoutSlow)
 	defer cancel()
-
 	var results []string
 	store := client.ImageService()
 	imgs, err := store.List(ctx)
@@ -1487,7 +1300,6 @@ func CDCleanSystem() (string, error) {
 			results = append(results, fmt.Sprintf("Удалено dangling-образов: %d", removedImg))
 		}
 	}
-
 	out, _ := RunWSL(fmt.Sprintf(
 		"rm -rf /var/lib/nerdctl/%s/cache/* 2>/dev/null; "+
 			"rm -rf /var/lib/containerd/tmp/* 2>/dev/null; "+
@@ -1499,16 +1311,11 @@ func CDCleanSystem() (string, error) {
 	if strings.Contains(out, "WSL_CLEANUP_DONE") {
 		results = append(results, "Кэш, временные файлы и логи очищены")
 	}
-
 	if len(results) == 0 {
 		return "Система чиста — нечего удалять", nil
 	}
 	return strings.Join(results, "\n"), nil
 }
-
-// ---------------------------------------------------------------------------
-// ИНВАЛИДАЦИЯ КЭШЕЙ
-// ---------------------------------------------------------------------------
 
 func CDInvalidateContainersCache() {
 	containersCache.Invalidate()
@@ -1531,17 +1338,12 @@ func CDInvalidateStatsCache() {
 	GlobalCacheManager.Invalidate(CacheEventStats, "manual")
 }
 
-// CDInvalidateAllCaches инвалидирует все кэши
 func CDInvalidateAllCaches() {
 	CDInvalidateContainersCache()
 	CDInvalidateImagesCache()
 	CDInvalidateVolumesCache()
 	CDInvalidateStatsCache()
 }
-
-// ---------------------------------------------------------------------------
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// ---------------------------------------------------------------------------
 
 func splitImageRef(ref string) (repo, tag string) {
 	if idx := strings.LastIndex(ref, ":"); idx > 0 && !strings.Contains(ref[idx:], "/") {

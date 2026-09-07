@@ -1,4 +1,3 @@
-// containers.go - оптимизированная версия BuildContainersTab
 package ui
 
 import (
@@ -16,29 +15,24 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// safeUI выполняет функцию в главном потоке UI (потокобезопасное обновление)
 func safeUI(f func()) {
 	fyne.Do(f)
 }
 
-// tableData — оптимизированная структура для хранения данных таблицы
 type tableData struct {
 	mu   sync.RWMutex
 	rows []wsl.Container
-	idx  map[string]int // ID → индекс (O(1) поиск вместо линейного)
+	idx  map[string]int
 }
 
-// runContainerOperations выполняет массовую операцию с ограничением числа запросов.
 func runContainerOperations(containers []wsl.Container, cancelCh <-chan struct{}, operation func(string) error) error {
 	if len(containers) == 0 {
 		return nil
 	}
-
 	workerCount := wsl.GetContainerOperationConcurrency()
 	if workerCount > len(containers) {
 		workerCount = len(containers)
 	}
-
 	jobs := make(chan wsl.Container)
 	var workers sync.WaitGroup
 	var errorMu sync.Mutex
@@ -87,11 +81,9 @@ func runContainerOperations(containers []wsl.Container, cancelCh <-chan struct{}
 	}
 	close(jobs)
 	workers.Wait()
-
 	return firstErr
 }
 
-// newDataTable создаёт новую структуру данных таблицы
 func newDataTable() *tableData {
 	return &tableData{
 		rows: make([]wsl.Container, 0, 32),
@@ -99,7 +91,6 @@ func newDataTable() *tableData {
 	}
 }
 
-// getRows возвращает строки для отображения
 func (td *tableData) getRows() []wsl.Container {
 	td.mu.RLock()
 	defer td.mu.RUnlock()
@@ -108,11 +99,9 @@ func (td *tableData) getRows() []wsl.Container {
 	return result
 }
 
-// setRows обновляет строки и индексную мапу
 func (td *tableData) setRows(rows []wsl.Container) {
 	td.mu.Lock()
 	td.rows = rows
-	// Обновляем индексную мапу
 	if td.idx == nil {
 		td.idx = make(map[string]int, len(rows))
 	} else {
@@ -126,7 +115,6 @@ func (td *tableData) setRows(rows []wsl.Container) {
 	td.mu.Unlock()
 }
 
-// getIndex возвращает индекс контейнера по ID (O(1))
 func (td *tableData) getIndex(id string) (int, bool) {
 	td.mu.RLock()
 	defer td.mu.RUnlock()
@@ -134,14 +122,12 @@ func (td *tableData) getIndex(id string) (int, bool) {
 	return idx, ok
 }
 
-// getRowCount возвращает количество строк
 func (td *tableData) getRowCount() int {
 	td.mu.RLock()
 	defer td.mu.RUnlock()
 	return len(td.rows)
 }
 
-// getRow возвращает строку по индексу
 func (td *tableData) getRow(index int) (wsl.Container, bool) {
 	td.mu.RLock()
 	defer td.mu.RUnlock()
@@ -151,25 +137,19 @@ func (td *tableData) getRow(index int) (wsl.Container, bool) {
 	return td.rows[index], true
 }
 
-// clear очищает данные
 func (td *tableData) clear() {
 	td.mu.Lock()
-	td.rows = td.rows[:0] // Reset slice without freeing memory
+	td.rows = td.rows[:0]
 	td.mu.Unlock()
 }
 
 func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
-	// Используем оптимизированную структуру данных
 	data := newDataTable()
 	var selectedID string
 
-	// Прогресс-бар (объявляем раньше для использования в callbacks)
 	progressBar := NewProgressBarComponent()
-
-	// Менеджер операций
 	opManager := NewOperationManager()
 
-	// Подключаем событийное обновление UI
 	opManager.SetOnUpdate(func() {
 		ops := opManager.GetActiveOperations()
 		safeUI(func() {
@@ -190,6 +170,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		}
 		return container.NewGridWithColumns(5, labels...)
 	}
+
 	containerList := widget.NewList(
 		func() int { return data.getRowCount() },
 		newContainerRow,
@@ -214,6 +195,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 			}
 		},
 	)
+
 	header := container.NewGridWithColumns(5,
 		widget.NewLabelWithStyle("ID", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewLabelWithStyle("Имя", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -222,7 +204,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		widget.NewLabelWithStyle("Порты", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 
-	// Обновление с debounce и более длинным интервалом для экономии CPU/IO.
 	var refreshTimer *time.Timer
 	var lastRefresh time.Time
 	refresh := func() {
@@ -233,7 +214,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		if refreshTimer != nil {
 			refreshTimer.Stop()
 		}
-
 		refreshTimer = time.AfterFunc(750*time.Millisecond, func() {
 			go func() {
 				select {
@@ -241,9 +221,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					return
 				default:
 				}
-
 				data.clear()
-
 				containers, err := wsl.ListContainers(true)
 				if err == nil {
 					data.setRows(containers)
@@ -255,7 +233,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		})
 	}
 
-	// Debounce для OnSelected — защита от повторных кликов
 	var selectedTimer *time.Timer
 	containerList.OnSelected = func(id widget.ListItemID) {
 		if selectedTimer != nil {
@@ -271,25 +248,20 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		})
 	}
 
-	// Асинхронные действия с прогресс-баром
-	// Исправление #3: sync.WaitGroup для гарантированной остановки progress-горутин
 	asyncAction := func(action func(progress *OperationManager, cancelCh chan struct{}) error, opType OperationType) {
 		go func() {
-			// Проверяем контекст приложения
 			select {
 			case <-wsl.AppContext().Done():
 				return
 			default:
 			}
-
 			cancelCh := make(chan struct{})
-			var wg sync.WaitGroup // 👈 защита от утечек
+			var wg sync.WaitGroup
 
 			safeUI(func() {
 				progressBar.SetCancelHandler(func() {
 					select {
 					case <-cancelCh:
-						// Уже закрыт — ничего не делаем
 					default:
 						close(cancelCh)
 					}
@@ -302,21 +274,17 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				})
 			})
 
-			// Начинаем операцию
 			opID := opManager.StartOperation(selectedID, opType)
 
-			// Эмуляция прогресса (для операций с таймаутом)
 			progressTicker := time.NewTicker(TickerProgress)
 			defer progressTicker.Stop()
 
-			// Goroutine прогресса — защищена WaitGroup для гарантированного выхода
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for {
 					select {
 					case <-progressTicker.C:
-						// Обновляем прогресс
 						currentOp := opManager.GetOperation(opID)
 						if currentOp != nil {
 							currentOp.Progress += 0.05
@@ -331,20 +299,16 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					case <-cancelCh:
 						return
 					case <-wsl.AppContext().Done():
-						// Приложение закрывается — выходим
 						return
 					}
 				}
 			}()
 
-			// Выполняем действие
 			err := action(opManager, cancelCh)
 
-			// Завершаем operation
 			if err != nil {
 				opManager.FinishOperation(opID, false, err.Error())
 			} else {
-				// Убедимся, что прогресс 100%
 				currentOp := opManager.GetOperation(opID)
 				if currentOp != nil {
 					currentOp.Progress = 1.0
@@ -354,21 +318,18 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				opManager.FinishOperation(opID, true, "")
 			}
 
-			// Останавливаем goroutine прогресса (безопасно — проверяем закрыт ли канал)
 			select {
 			case <-cancelCh:
-				// Уже закрыт
 			default:
 				close(cancelCh)
 			}
-			wg.Wait() // 👈 ЖДЁМ завершения progress-горутины
+			wg.Wait()
 
-			// Обновляем данные таблицы и список контейнеров
 			containers, listErr := wsl.ListContainers(true)
 			if listErr == nil {
 				data.setRows(containers)
 				safeUI(func() {
-						containerList.Refresh()
+					containerList.Refresh()
 				})
 			}
 		}()
@@ -394,7 +355,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 						if err != nil {
 							return err
 						}
-
 						var stopped []wsl.Container
 						for _, container := range containers {
 							status := strings.ToLower(container.Status)
@@ -407,31 +367,26 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				}
 			}),
 			makeBtn("Остановить", func() {
-				// Если выбран контейнер — останавливаем его
 				if selectedID != "" {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 						progress.UpdateOperation(selectedID, 0.1, "Остановка...")
 						return wsl.StopContainer(selectedID)
 					}, OpStop)
 				} else {
-					// Если ничего не выбрано — останавливаем ВСЕ контейнеры
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 						containers, err := wsl.ListContainers(true)
 						if err != nil {
 							return err
 						}
-
 						var running []wsl.Container
 						for _, c := range containers {
 							if strings.Contains(strings.ToLower(c.Status), "running") || strings.Contains(strings.ToLower(c.Status), "up") {
 								running = append(running, c)
 							}
 						}
-
 						if len(running) == 0 {
 							return nil
 						}
-
 						return runContainerOperations(running, cancelCh, wsl.StopContainer)
 					}, OpStop)
 				}
@@ -452,25 +407,20 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				}
 			}),
 			makeBtn("Удалить", func() {
-				// Если выбран контейнер — удаляем его
 				if selectedID != "" {
 					dialog.ShowConfirm("Удаление", fmt.Sprintf("Удалить контейнер %s?", selectedID), func(ok bool) {
 						if ok {
 							asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-								// Принудительно убиваем
-								_, err := wsl.RunWSL("nerdctl kill " + selectedID + " 2>/dev/null; echo 'kill_done'")
+								_, err := wsl.RunWSL("nerdctl kill " + wsl.ShellQuote(selectedID) + " 2>/dev/null; echo 'kill_done'")
 								if err != nil {
 									progress.UpdateOperation(selectedID, 0.2, "Внимание: ошибка kill — продолжаем...")
 								}
-
-								// Удаляем
 								progress.UpdateOperation(selectedID, 0.6, "Удаление...")
 								return wsl.RemoveContainer(selectedID)
 							}, OpRemove)
 						}
 					}, win)
 				} else {
-					// Если ничего не выбрано — удаляем ВСЕ контейнеры
 					dialog.ShowConfirm("Удаление всех", "Удалить ВСЕ контейнеры?", func(ok bool) {
 						if ok {
 							asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
@@ -478,26 +428,21 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								if err != nil {
 									return err
 								}
-
 								if len(containers) == 0 {
 									return nil
 								}
-
-								// ОПТИМИЗАЦИЯ: Два вызова вместо N*2
-								// Собираем ID всех контейнеров
 								var ids []string
 								for _, c := range containers {
 									ids = append(ids, c.ID)
 								}
-
-								// ШАГ 1: Один kill для всех
-								killCmd := "nerdctl kill " + strings.Join(ids, " ") + " 2>/dev/null"
+								var quotedIDs []string
+								for _, id := range ids {
+									quotedIDs = append(quotedIDs, wsl.ShellQuote(id))
+								}
+								killCmd := "nerdctl kill " + strings.Join(quotedIDs, " ") + " 2>/dev/null"
 								_, _ = wsl.RunWSL(killCmd)
-
-								// ШАГ 2: Один rm -f для всех
-								rmCmd := "nerdctl rm -f " + strings.Join(ids, " ") + " 2>/dev/null"
+								rmCmd := "nerdctl rm -f " + strings.Join(quotedIDs, " ") + " 2>/dev/null"
 								_, _ = wsl.RunWSL(rmCmd)
-
 								return nil
 							}, OpRemove)
 						}
@@ -524,22 +469,16 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 						if !ok {
 							return
 						}
-
-						// Запускаем длительную операцию в горутине
 						go func() {
-							// Проверяем контекст приложения
 							select {
 							case <-wsl.AppContext().Done():
 								return
 							default:
 							}
-
 							buildMode := (radio.Selected == "Собрать весь проект")
 
-							// Сбрасываем кэш WSL перед сборкой
 							wsl.InvalidateWSLCache()
 
-							// Создаём cancellable context для отмены сборки
 							ctx, cancel := context.WithCancel(context.Background())
 							defer cancel()
 
@@ -560,7 +499,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 							opID := opManager.StartOperation("build", OpBuild)
 
-							// Выполняем сборку/запуск
 							var err error
 							var out string
 							if buildMode {
@@ -569,7 +507,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								out, err = wsl.RunProject(ctx)
 							}
 
-							// Парсим фазу сборки по выводу
 							if out != "" {
 								lines := strings.Split(out, "\n")
 								var lastLines []string
@@ -583,7 +520,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								opManager.UpdateOperation("build", phase.Progress, wsl.FormatBuildStatus(phase))
 							}
 
-							// Завершаем операцию
 							if err != nil {
 								opManager.FinishOperation(opID, false, err.Error())
 								safeUI(func() {
@@ -599,11 +535,10 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								opManager.FinishOperation(opID, true, "")
 							}
 
-							// Обновляем таблицу контейнеров
 							containers, _ := wsl.ListContainers(true)
 							data.setRows(containers)
 							safeUI(func() {
-										containerList.Refresh()
+								containerList.Refresh()
 							})
 						}()
 					},
@@ -619,7 +554,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					return
 				}
 
-				// Ищем контейнер в данных
 				var currentImage string
 				data.mu.RLock()
 				for _, c := range data.rows {
@@ -637,40 +571,39 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					return
 				}
 
-				// Используем EntryDialog
 				safeUI(func() {
 					dialog.ShowEntryDialog("Введите новый образ", "myapp:latest", func(value string) {
 						if value == "" {
 							return
 						}
-					newImage := strings.TrimSpace(value)
+						newImage := strings.TrimSpace(value)
 
-					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-						progress.UpdateOperation(selectedID, 0.10, "Остановка контейнера...")
-						_, stopErr := wsl.RunWSL(fmt.Sprintf("nerdctl stop %s", selectedID))
-						if stopErr != nil {
-							progress.UpdateOperation(selectedID, 0.15, "Внимание: не удалось остановить, продолжаем...")
-						}
-
-						progress.UpdateOperation(selectedID, 0.20, "Удаление старого контейнера...")
-						_, err := wsl.RunWSL(fmt.Sprintf("nerdctl rm -f %s", selectedID))
-						if err != nil {
-							return fmt.Errorf("не удалось удалить контейнер: %w", err)
-						}
-
-						if currentImage != newImage {
-							progress.UpdateOperation(selectedID, 0.30, "Удаление старого образа...")
-							_, err := wsl.RunWSL(fmt.Sprintf("nerdctl rmi -f %s", currentImage))
-							if err != nil {
-								progress.UpdateOperation(selectedID, 0.35, "Внимание: старый образ не удалён")
+						asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
+							progress.UpdateOperation(selectedID, 0.10, "Остановка контейнера...")
+							_, stopErr := wsl.RunWSL(fmt.Sprintf("nerdctl stop %s", wsl.ShellQuote(selectedID)))
+							if stopErr != nil {
+								progress.UpdateOperation(selectedID, 0.15, "Внимание: не удалось остановить, продолжаем...")
 							}
-						}
 
-						progress.UpdateOperation(selectedID, 0.40, "Загрузка нового образа...")
-						pullOut, pullErr := wsl.RunWSL(fmt.Sprintf("nerdctl pull %s", newImage))
-						if pullErr != nil {
-							return fmt.Errorf("не удалось загрузить образ: %w", pullErr)
-						}
+							progress.UpdateOperation(selectedID, 0.20, "Удаление старого контейнера...")
+							_, err := wsl.RunWSL(fmt.Sprintf("nerdctl rm -f %s", wsl.ShellQuote(selectedID)))
+							if err != nil {
+								return fmt.Errorf("не удалось удалить контейнер: %w", err)
+							}
+
+							if currentImage != newImage {
+								progress.UpdateOperation(selectedID, 0.30, "Удаление старого образа...")
+								_, err := wsl.RunWSL(fmt.Sprintf("nerdctl rmi -f %s", wsl.ShellQuote(currentImage)))
+								if err != nil {
+									progress.UpdateOperation(selectedID, 0.35, "Внимание: старый образ не удалён")
+								}
+							}
+
+							progress.UpdateOperation(selectedID, 0.40, "Загрузка нового образа...")
+							pullOut, pullErr := wsl.RunWSL(fmt.Sprintf("nerdctl pull %s", wsl.ShellQuote(newImage)))
+							if pullErr != nil {
+								return fmt.Errorf("не удалось загрузить образ: %w", pullErr)
+							}
 
 							if pullOut != "" {
 								lines := strings.Split(pullOut, "\n")
@@ -688,19 +621,18 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 							progress.UpdateOperation(selectedID, 0.85, "Пересоздание контейнера...")
 
-							runCmd := fmt.Sprintf("nerdctl run -d --name %s", currentImage)
+							runCmd := fmt.Sprintf("nerdctl run -d --name %s", wsl.ShellQuote(currentImage))
 
-							volumesOut, _ := wsl.RunWSL(fmt.Sprintf("nerdctl inspect --format '{{json .Mounts}}' %s 2>/dev/null", selectedID))
+							volumesOut, _ := wsl.RunWSL(fmt.Sprintf("nerdctl inspect --format '{{json .Mounts}}' %s 2>/dev/null", wsl.ShellQuote(selectedID)))
 							if volumesOut != "" && volumesOut != "null" {
-								runCmd += " --volumes-from " + selectedID
+								runCmd += " --volumes-from " + wsl.ShellQuote(selectedID)
 							}
 
-							portsOut, _ := wsl.RunWSL(fmt.Sprintf("nerdctl inspect --format '{{json .HostConfig.PortBindings}}' %s 2>/dev/null", selectedID))
+							portsOut, _ := wsl.RunWSL(fmt.Sprintf("nerdctl inspect --format '{{json .HostConfig.PortBindings}}' %s 2>/dev/null", wsl.ShellQuote(selectedID)))
 							if portsOut != "" && portsOut != "null" {
 								runCmd += " --publish-all"
 							}
 
-							// Добавляем лимиты CPU и памяти из настроек
 							if cpu := wsl.GetDefaultCPU(); cpu != "" {
 								runCmd += fmt.Sprintf(" --cpus=%s", cpu)
 							}
@@ -708,7 +640,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								runCmd += fmt.Sprintf(" --memory=%s", mem)
 							}
 
-							runCmd += " " + newImage
+							runCmd += " " + wsl.ShellQuote(newImage)
 
 							_, runErr := wsl.RunWSL(runCmd)
 							if runErr != nil {
@@ -716,7 +648,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 							}
 
 							progress.UpdateOperation(selectedID, 0.95, "Обновление завершено!")
-
 							return nil
 						}, OpStart)
 					}, win)
@@ -731,27 +662,21 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, container.NewBorder(header, nil, nil, nil, containerList)))
 }
 
-// showErrorDialog показывает кастомный диалог с ошибкой, поддерживающий прокрутку, перенос и копирование текста
 func showErrorDialog(win fyne.Window, errMsg string) {
-	// Создаём Entry вместо Label — он поддерживает выделение текста для копирования
 	entry := widget.NewMultiLineEntry()
 	entry.SetText(errMsg)
-	entry.Disable() // Делает Entry только для чтения (выглядит как Label)
+	entry.Disable()
 	entry.Wrapping = fyne.TextWrapWord
 
-	// Создаём скроллируемый контейнер
 	scroll := container.NewScroll(entry)
 	scroll.SetMinSize(fyne.NewSize(600, 400))
 
-	// Создаём кастомный диалог
 	dlg := dialog.NewCustomConfirm(
 		"Ошибка сборки",
 		"OK",
 		"",
 		scroll,
-		func(closed bool) {
-			// Ничего не делаем — просто закрываем
-		},
+		func(closed bool) {},
 		win,
 	)
 	dlg.Resize(fyne.NewSize(650, 450))

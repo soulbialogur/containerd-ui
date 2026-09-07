@@ -16,11 +16,124 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// ============================================================================
-// Модуль статуса компонентов (Полностью переписанный Dashboard)
-// ============================================================================
+var systemMetrics = struct {
+	sync.RWMutex
+	data      map[string]string
+	timestamp time.Time
+	ttl       time.Duration
+}{
+	ttl:  CacheStatus,
+	data: make(map[string]string),
+}
 
-// ComponentStatus описывает статус одного компонента
+func getSystemMetrics() map[string]string {
+	systemMetrics.RLock()
+	if time.Since(systemMetrics.timestamp) < systemMetrics.ttl {
+		result := make(map[string]string, len(systemMetrics.data))
+		for k, v := range systemMetrics.data {
+			result[k] = v
+		}
+		systemMetrics.RUnlock()
+		return result
+	}
+	systemMetrics.RUnlock()
+
+	script := "" +
+		"echo 'CONTAINERS_TOTAL'; nerdctl ps -a --format '{{.ID}}' 2>/dev/null | wc -l; " +
+		"echo 'CONTAINERS_RUNNING'; nerdctl ps --format '{{.ID}}' 2>/dev/null | wc -l; " +
+		"echo 'IMAGES'; nerdctl images --format '{{.ID}}' 2>/dev/null | wc -l; " +
+		"echo 'VOLUMES'; nerdctl volume ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l; " +
+		"echo 'NETWORKS'; nerdctl network ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l"
+
+	out, err := runWSLWithTimeout(script, 5*time.Second)
+	if err != nil {
+		result := map[string]string{
+			"containers_total": "—", "containers_running": "—",
+			"images": "—", "volumes": "—", "networks": "—",
+		}
+		systemMetrics.Lock()
+		for k, v := range result {
+			systemMetrics.data[k] = v
+		}
+		systemMetrics.timestamp = time.Now()
+		systemMetrics.Unlock()
+		return result
+	}
+
+	result := make(map[string]string)
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if idx := strings.Index(line, "; "); idx >= 0 {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "CONTAINERS_TOTAL; "):
+			result["containers_total"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_TOTAL; "))
+		case strings.HasPrefix(line, "CONTAINERS_RUNNING; "):
+			result["containers_running"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_RUNNING; "))
+		case strings.HasPrefix(line, "IMAGES; "):
+			result["images"] = strings.TrimSpace(strings.TrimPrefix(line, "IMAGES; "))
+		case strings.HasPrefix(line, "VOLUMES; "):
+			result["volumes"] = strings.TrimSpace(strings.TrimPrefix(line, "VOLUMES; "))
+		case strings.HasPrefix(line, "NETWORKS; "):
+			result["networks"] = strings.TrimSpace(strings.TrimPrefix(line, "NETWORKS; "))
+		}
+	}
+
+	if result["containers_total"] == "" {
+		result["containers_total"] = "—"
+	}
+	if result["containers_running"] == "" {
+		result["containers_running"] = "—"
+	}
+	if result["images"] == "" {
+		result["images"] = "—"
+	}
+	if result["volumes"] == "" {
+		result["volumes"] = "—"
+	}
+	if result["networks"] == "" {
+		result["networks"] = "—"
+	}
+
+	systemMetrics.Lock()
+	for k, v := range result {
+		systemMetrics.data[k] = v
+	}
+	systemMetrics.timestamp = time.Now()
+	systemMetrics.Unlock()
+
+	return result
+}
+
+type metricCard struct {
+	label   *widget.Label
+	title   string
+	icon    string
+	content string
+}
+
+func newMetricCard(title, icon string) *metricCard {
+	lbl := widget.NewLabel("—")
+	lbl.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
+	return &metricCard{label: lbl, title: title, icon: icon}
+}
+
+func (mc *metricCard) widget() fyne.CanvasObject {
+	return container.NewBorder(
+		nil, nil,
+		widget.NewLabelWithStyle(mc.title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		nil,
+		container.NewHBox(widget.NewLabel(mc.icon), mc.label),
+	)
+}
+
+func (mc *metricCard) setValue(val string) {
+	mc.content = val
+	mc.label.SetText(val)
+}
+
 type ComponentStatus struct {
 	Name    string
 	Version string
@@ -29,18 +142,15 @@ type ComponentStatus struct {
 	Detail  string
 }
 
-// statusCache кэширует результат проверки всех компонентов
 var statusCache = struct {
 	sync.RWMutex
 	data      []ComponentStatus
 	timestamp time.Time
 	ttl       time.Duration
 }{
-	ttl: CacheStatus, // Кэш на 5 секунд
+	ttl: CacheStatus,
 }
 
-// runWSLWithTimeout — выполняет команду WSL с таймаутом (без кэширования)
-// Возвращает stdout + stderr (объединённые) и ошибку (включая таймаут)
 func runWSLWithTimeout(command string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -54,9 +164,7 @@ func runWSLWithTimeout(command string, timeout time.Duration) (string, error) {
 	return string(out), err
 }
 
-// getAllComponentsStatus — единый вызов WSL для проверки ВСЕХ компонентов
 func getAllComponentsStatus() []ComponentStatus {
-	// Проверяем кэш
 	statusCache.RLock()
 	if time.Since(statusCache.timestamp) < statusCache.ttl {
 		result := make([]ComponentStatus, len(statusCache.data))
@@ -66,7 +174,6 @@ func getAllComponentsStatus() []ComponentStatus {
 	}
 	statusCache.RUnlock()
 
-	// Единый вызов WSL — все проверки в одном процессе (добавлен sudo для systemctl)
 	svcName := wsl.GetSystemdService()
 	cmd := "" +
 		"echo 'WSL_CHECK_START'; " +
@@ -76,16 +183,14 @@ func getAllComponentsStatus() []ComponentStatus {
 		"which nerdctl > /dev/null 2>&1 && echo 'NERDCTL:OK' || echo 'NERDCTL:NO'; " +
 		"echo 'WSL_CHECK_END'"
 
-	out, err := runWSLWithTimeout(cmd, 5*time.Second) // Таймаут 5 секунд
+	out, err := runWSLWithTimeout(cmd, 5*time.Second)
 
-	// Получаем версии компонентов
 	versions := getComponentVersions()
 	distro := wsl.GetWslDistro()
 	versions["WSL"] = distro
 
 	var result []ComponentStatus
 	if err != nil {
-		// Если таймаут или другая ошибка — помечаем все компоненты как недоступные
 		result = []ComponentStatus{
 			{Name: "WSL", Version: versions["WSL"], Icon: "❌", Active: false, Detail: "Таймаут/ошибка проверки"},
 			{Name: "Containerd", Version: versions["Containerd"], Icon: "⚠️", Active: false, Detail: "Недоступен"},
@@ -127,7 +232,6 @@ func getAllComponentsStatus() []ComponentStatus {
 		}
 	}
 
-	// Сохраняем в кэш
 	statusCache.Lock()
 	statusCache.data = result
 	statusCache.timestamp = time.Now()
@@ -136,17 +240,14 @@ func getAllComponentsStatus() []ComponentStatus {
 	return result
 }
 
-// versionEntry хранит версию одного компонента
 type versionEntry struct {
 	version string
 	ok      bool
 }
 
-// getComponentVersions получает версии всех компонентов за ОДИН вызов WSL
 func getComponentVersions() map[string]string {
 	versions := make(map[string]string)
 
-	// Один вызов WSL — все версии в одном процессе
 	script := "" +
 		"echo 'WSL_VERSION'; wsl --version 2>/dev/null | head -1; " +
 		"echo 'CONTAINERD_VERSION'; sudo containerd --version 2>/dev/null; " +
@@ -168,7 +269,6 @@ func getComponentVersions() map[string]string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Определяем, для какого компонента эта строка
 		switch {
 		case strings.HasPrefix(line, "WSL_VERSION"):
 			currentKey = "WSL"
@@ -184,7 +284,6 @@ func getComponentVersions() map[string]string {
 		}
 	}
 
-	// Fallback: если версия не найдена
 	if versions["WSL"] == "" {
 		versions["WSL"] = "—"
 	}
@@ -201,25 +300,19 @@ func getComponentVersions() map[string]string {
 	return versions
 }
 
-// shortVersion обрезает вывод до короткого вида (имя + версия)
-// Пример: "containerd github.com/containerd/containerd/v2 v2.1.4-0.20250430162418-..." → "v2.1.4"
-// Пример: "buildctl github.com/moby/buildkit v0.15.1" → "v0.15.1"
 func shortVersion(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "—"
 	}
-	// Ищем последовательность цифр, разделённых точками (три группы)
 	re := regexp.MustCompile(`v?(\d+\.\d+\.\d+)`)
 	match := re.FindStringSubmatch(raw)
 	if len(match) > 0 {
-		// match[0] — полное совпадение (например, "v2.1.4" или "2.1.4")
 		if strings.HasPrefix(match[0], "v") {
 			return match[0]
 		}
 		return "v" + match[1]
 	}
-	// fallback: если ничего не найдено, возвращаем первые два слова
 	parts := strings.Fields(raw)
 	if len(parts) >= 2 {
 		return parts[0] + " " + parts[1]
@@ -227,75 +320,33 @@ func shortVersion(raw string) string {
 	return raw
 }
 
-// BuildStatusTab — главная функция построения вкладки статуса (Панель приборов)
 func BuildStatusTab() fyne.CanvasObject {
-	// Создаём компонентные карточки, которые скрывают версии при сжатии.
 	wslCard := newResponsiveStatusCard("WSL")
 	containerdCard := newResponsiveStatusCard("Containerd")
 	buildkitdCard := newResponsiveStatusCard("Buildkitd")
 	nerdctlCard := newResponsiveStatusCard("Nerdctl")
 
-	// Идеально ровная таблица (без HBox внутри ячеек)
-	table := widget.NewTable(
-		func() (int, int) {
-			statusCache.RLock()
-			defer statusCache.RUnlock()
-			return len(statusCache.data) + 1, 3
-		},
-		func() fyne.CanvasObject {
-			label := widget.NewLabel("")
-			label.Wrapping = fyne.TextTruncate
-			return label
-		},
-		func(id widget.TableCellID, o fyne.CanvasObject) {
-			label := o.(*widget.Label)
-			statusCache.RLock()
-			defer statusCache.RUnlock()
+	metrics := map[string]*metricCard{
+		"containers_running": newMetricCard("Контейнеры", "📦"),
+		"images":             newMetricCard("Образы", "🖼️"),
+		"volumes":            newMetricCard("Тома", "💾"),
+		"networks":           newMetricCard("Сети", "🌐"),
+	}
 
-			if id.Row == 0 {
-				label.TextStyle = fyne.TextStyle{Bold: true}
-				switch id.Col {
-				case 0:
-					label.SetText("Компонент")
-				case 1:
-					label.SetText("Версия")
-				case 2:
-					label.SetText("Статус")
-				}
-				return
+	updateMetrics := func() {
+		m := getSystemMetrics()
+		for k, mc := range metrics {
+			if v, ok := m[k]; ok {
+				mc.setValue(v)
 			}
+		}
+	}
 
-			idx := id.Row - 1
-			if idx >= len(statusCache.data) {
-				return
-			}
-
-			cs := statusCache.data[idx]
-			switch id.Col {
-			case 0:
-				label.SetText(cs.Name)
-			case 1:
-				if cs.Version != "" {
-					label.SetText(cs.Version)
-				} else {
-					label.SetText("—")
-				}
-			case 2:
-				label.SetText(cs.Icon + " " + wsl.TranslateStatus(cs.Detail))
-			}
-		},
-	)
-	table.SetColumnWidth(0, 110)
-	table.SetColumnWidth(1, 130)
-	table.SetColumnWidth(2, 190)
-
-	// Метка последней проверки
 	lastCheckLabel := widget.NewLabel("Последняя проверка: —")
 
-	// Функция обновления статуса (атомарное обновление)
 	updateUI := func() {
 		statusCache.Lock()
-		statusCache.timestamp = time.Time{} // Сбрасываем кэш
+		statusCache.timestamp = time.Time{}
 		statusCache.Unlock()
 
 		statuses := getAllComponentsStatus()
@@ -320,18 +371,14 @@ func BuildStatusTab() fyne.CanvasObject {
 			}
 		}
 		lastCheckLabel.SetText("Последняя проверка: " + time.Now().Format("15:04:05"))
-		table.Refresh()
+		updateMetrics()
 	}
 
-	// Кнопки управления
 	btnRefresh := widget.NewButton("🔄 Обновить", func() { go updateUI() })
 
-	// Управляем активностью вкладки: тикер останавливается при скрытии
 	tab := newTabActive(true, TickerAutoRefresh, func() {
 		updateUI()
 	})
-
-	// Регистрируем в глобальной карте по имени вкладки (см. строку 257)
 
 	autoRefresh := widget.NewCheck("Автообновление (30с)", func(checked bool) {
 		tab.SetActive(checked)
@@ -340,6 +387,12 @@ func BuildStatusTab() fyne.CanvasObject {
 
 	btnStartBuildkitd := widget.NewButton("▶ Запустить Buildkitd", func() {
 		go func() {
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+
 			if err := wsl.StartBuildkitd(); err != nil {
 				lastCheckLabel.SetText("Ошибка: " + err.Error())
 			} else {
@@ -350,35 +403,37 @@ func BuildStatusTab() fyne.CanvasObject {
 
 	btnStopBuildkitd := widget.NewButton("⏹ Остановить Buildkitd", func() {
 		go func() {
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+
 			wsl.StopBuildkitd()
 			updateUI()
 		}()
 	})
 
-	// Первый запуск при открытии вкладки
 	updateUI()
 
-	// Регистрируем tabActive в глобальной карте по имени вкладки
 	registerTabNamed("Статус", tab)
 
-	return withVerticalScroll(container.NewBorder(
-		container.NewVBox(
-			// Панель инструментов
-			container.NewHBox(btnRefresh, autoRefresh, layout.NewSpacer(), lastCheckLabel),
-			widget.NewSeparator(),
-			// Дашборд из 4 карточек
-			container.NewAdaptiveGrid(4, wslCard.CanvasObject(), containerdCard.CanvasObject(), buildkitdCard.CanvasObject(), nerdctlCard.CanvasObject()),
-			// Панель управления Buildkitd
-			container.NewHBox(
-				widget.NewLabelWithStyle("Управление Buildkitd:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-				btnStartBuildkitd, btnStopBuildkitd,
-			),
-			widget.NewSeparator(),
-			// Заголовок таблицы
-			widget.NewLabelWithStyle("Детали компонентов:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	return withVerticalScroll(container.NewVBox(
+		container.NewHBox(btnRefresh, autoRefresh, layout.NewSpacer(), lastCheckLabel),
+		widget.NewSeparator(),
+		container.NewAdaptiveGrid(4, wslCard.CanvasObject(), containerdCard.CanvasObject(), buildkitdCard.CanvasObject(), nerdctlCard.CanvasObject()),
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Обзор системы:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewAdaptiveGrid(4,
+			metrics["containers_running"].widget(),
+			metrics["images"].widget(),
+			metrics["volumes"].widget(),
+			metrics["networks"].widget(),
 		),
-		nil, nil, nil,
-		// Сама таблица
-		table,
+		widget.NewSeparator(),
+		container.NewHBox(
+			widget.NewLabelWithStyle("Управление Buildkitd:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			btnStartBuildkitd, btnStopBuildkitd,
+		),
 	))
 }

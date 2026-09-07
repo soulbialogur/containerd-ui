@@ -2,6 +2,8 @@
 
 For builds and deployments to work correctly, the project must meet a few basic requirements. The application does not hard-code service names, networks, or ports: enter the actual values in the settings and in `config.json`.
 
+> **Multi-Project Support**: The application manages multiple projects from a single installation. Only the **active** project (set in `config.json` or via the Settings UI) is used for builds and deployments. See [Configuration](configuration.md#multi-project-support) for details.
+
 ## 1. Compose File
 
 The project root must contain a `compose.yaml` or `docker-compose.yml` file.
@@ -74,10 +76,11 @@ For domain publishing, DNS must point to the target server, and the domain must 
 
 Use this guide when you need to:
 
-- checking the project before a build;
-- preparing a Compose file for deployment;
-- confirming that the network selected in `deploy_network` is declared correctly;
-- checking service names and their internal ports.
+- verify the active project before a build;
+- prepare a Compose file for deployment;
+- confirm that the network selected in `deploy_network` is declared correctly;
+- check service names and their internal ports;
+- switch between projects using the multi-project UI.
 
 See also:
 

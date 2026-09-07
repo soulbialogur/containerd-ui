@@ -32,7 +32,7 @@ Containerd UI — это Windows-обёртка над контейнерной 
 4. Соберите приложение:
 
 ```powershell
-cd "C:\Users\Пользователь\OneDrive\Рабочий стол\ai-chatbot-website\containerd-ui"
+cd "C:\Users\User\OneDrive\Рабочий стол\project"
 bash build.sh
 ```
 

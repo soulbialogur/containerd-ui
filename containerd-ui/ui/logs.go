@@ -2,7 +2,6 @@ package ui
 
 import (
 	"containerd-ui/wsl"
-	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -18,7 +17,6 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	logText.Disable()
 	logText.SetPlaceHolder("Выберите контейнер для просмотра логов")
 
-	// Единая функция загрузки логов
 	loadLogs := func(id string) {
 		if id == "" {
 			safeUI(func() {
@@ -95,7 +93,6 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 
 	btnRefreshList := widget.NewButton("Список", refresh)
 
-	// НОВАЯ КНОПКА: очистка логов выбранного контейнера
 	btnClearLogs := widget.NewButton("Очистить логи", func() {
 		if selectedID == "" {
 			safeUI(func() {
@@ -115,7 +112,6 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 				if err != nil {
 					logText.SetText("Ошибка очистки логов: " + err.Error())
 				} else {
-					// После очистки обновляем отображение (лог станет пустым)
 					loadLogs(selectedID)
 				}
 				logText.Refresh()
@@ -128,13 +124,10 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 		selector,
 		btnRefreshList,
 		btnRefresh,
-		btnClearLogs, // добавлена в панель
+		btnClearLogs,
 	)
 
 	refresh()
-
-	_ = strings.TrimSpace
-	_ = win
 
 	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, logText))
 }
