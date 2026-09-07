@@ -1,75 +1,68 @@
 # Containerd UI
-
-Приложение для управления контейнерами, сборкой и деплоем через WSL2, containerd, nerdctl и BuildKit.
-
-> Документация проекта ориентирована в первую очередь на русскоязычных пользователей. Все основные инструкции, описания настроек и решения проблем собраны на русском языке. Если у вас есть вопросы по установке, работе приложения или лицензии, пишите на почту: soulbialogur@gmail.com.
-
-## Что это
-
-Containerd UI — это Windows-обёртка над контейнерной средой, которая помогает:
-
-- управлять контейнерами, образами и томами;
-- запускать и пересобирать проект;
-- следить за ресурсами WSL/containerd;
-- настраивать proxy и деплой на домен;
-- выполнять диагностику и очистку окружения.
-
-## Документация
-
-Подробные материалы находятся в папке [docs](docs/README.md):
-
-- [Быстрый старт](docs/quickstart.md)
-- [Установка окружения](docs/installation.md)
-- [Конфигурация](docs/configuration.md)
-- [Деплой на домен](docs/deployment.md)
-- [Решение проблем](docs/troubleshooting.md)
-
-## Быстрый старт
-
-1. Установите WSL2 и Ubuntu 24.04.
-2. Установите `containerd`, `nerdctl` и `buildkitd` внутри WSL.
-3. При необходимости установите `cloudflared`.
-4. Соберите приложение:
-
+ 
+An app for managing containers, builds, and deployments through WSL2, containerd, nerdctl, and BuildKit.
+ 
+> This project's documentation is written mainly for Russian-speaking users — all the core instructions, configuration details, and troubleshooting guides are in Russian. If you have any questions about installation, using the app, or licensing, reach out at soulbialogur@gmail.com.
+ 
+## What It Does
+ 
+Containerd UI is a Windows wrapper around your container environment. It helps you:
+ 
+- manage containers, images, and volumes
+- build and rebuild your project
+- keep an eye on WSL/containerd resource usage
+- set up proxying and domain deployment
+- diagnose and clean up your environment
+## Documentation
+ 
+You'll find detailed guides in the [docs](docs/README.md) folder:
+ 
+- [Quick Start](docs/quickstart.md)
+- [Setting Up Your Environment](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Deploying to a Domain](docs/deployment.md)
+- [Troubleshooting](docs/troubleshooting.md)
+## Quick Start
+ 
+1. Install WSL2 and Ubuntu 24.04.
+2. Inside WSL, install `containerd`, `nerdctl`, and `buildkitd`.
+3. Install `cloudflared` if you need it.
+4. Build the app:
 ```powershell
 cd "C:\Users\User\OneDrive\Рабочий стол\project"
 bash build.sh
 ```
-
-5. Запустите `containerd-ui.exe`.
-6. Укажите корень проекта и проверьте статус окружения.
-
-## Архитектура
-
-Приложение работает по модели «два слоя доступа»: gRPC API containerd для основного управления и WSL + nerdctl как резервный fallback. Подробная схема и принципы работы описаны в [docs/concepts.md](docs/concepts.md).
-
-## Настройки
-
-Основные параметры сохраняются в `config.json`, который находится рядом с исполняемым файлом. Подробности — в [docs/configuration.md](docs/configuration.md).
-
-## Основные возможности
-
-- управление контейнерами и массовыми операциями;
-- сборка проекта и отслеживание прогресса;
-- мониторинг CPU/RAM/disk и состояния сервисов;
-- работа с сетями, томами, образами и логами;
-- BuildKit и очистка кэша;
-- Traefik + Let's Encrypt и Cloudflare Tunnel;
-- диагностика перед деплоем и откат при ошибке;
-- кэширование результатов и управление жизненным циклом вкладок через `economy_mode`.
-
-### Краткие ссылки по ключевым возможностям
-
-- [Кэширование и инвалидирование](docs/configuration.md#кэш-и-автоматическая-инвалидизация)
-- [Жизненный цикл вкладок и экономия ресурсов](docs/configuration.md#режим-экономии-ресурсов)
-- [Прогресс и отмена операций](docs/configuration.md#прогресс-и-отмена-длительных-операций)
-
-## Ссылки
-
-- [Документация по разделам](docs/README.md)
-- [Быстрый старт](docs/quickstart.md)
-- [Установка окружения](docs/installation.md)
-- [Конфигурация](docs/configuration.md)
-- [Деплой на домен](docs/deployment.md)
-- [Решение проблем](docs/troubleshooting.md)
-
+ 
+5. Launch `containerd-ui.exe`.
+6. Point it to your project root and check that the environment status looks good.
+## Architecture
+ 
+The app uses a "two-layer access" approach: containerd's gRPC API handles the main management tasks, with WSL + nerdctl acting as a fallback. For the full breakdown of how this works, see [docs/concepts.md](docs/concepts.md).
+ 
+## Settings
+ 
+Your main settings live in `config.json`, sitting right next to the executable. More on that in [docs/configuration.md](docs/configuration.md).
+ 
+## Key Features
+ 
+- Container management with bulk operations
+- Project builds with progress tracking
+- CPU/RAM/disk monitoring and service status checks
+- Full support for networks, volumes, images, and logs
+- BuildKit integration with cache cleanup
+- Traefik + Let's Encrypt and Cloudflare Tunnel support
+- Pre-deployment diagnostics with automatic rollback on failure
+- Result caching and tab lifecycle management via `economy_mode`
+### Quick Links to Key Features
+ 
+- [Caching and automatic invalidation](docs/configuration.md#кэш-и-автоматическая-инвалидизация)
+- [Tab lifecycle and resource-saving mode](docs/configuration.md#режим-экономии-ресурсов)
+- [Progress tracking and cancelling long operations](docs/configuration.md#прогресс-и-отмена-длительных-операций)
+## Links
+ 
+- [Full Documentation](docs/README.md)
+- [Quick Start](docs/quickstart.md)
+- [Setting Up Your Environment](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Deploying to a Domain](docs/deployment.md)
+- [Troubleshooting](docs/troubleshooting.md)
