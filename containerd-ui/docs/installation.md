@@ -103,7 +103,9 @@ The main container access model and fallback behavior are described in [concepts
 
 ## Where Configuration Is Stored
 
-Deployment settings, project paths, and environment parameters are stored in `config.json` next to `containerd-ui.exe`. This includes the WSL distribution, proxy, domains, services, and internal application ports.
+Deployment settings, project paths, environment parameters, and the interface language are stored in `config.json` next to `containerd-ui.exe`. This includes the WSL distribution, proxy, domains, services, internal application ports, and the `language` field (`ru` or `en`).
+
+If the `language` field is missing or invalid, the application falls back to Russian. The language can be changed in the Settings tab at any time.
 
 ## Next Steps
 

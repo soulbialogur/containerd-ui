@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"context"
 	"fmt"
@@ -197,11 +198,11 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 	)
 
 	header := container.NewGridWithColumns(5,
-		widget.NewLabelWithStyle("ID", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Имя", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Образ", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Статус", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Порты", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("containers.id"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("containers.name"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("containers.image"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("containers.status"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("containers.ports"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 
 	var refreshTimer *time.Timer
@@ -310,9 +311,9 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				opManager.FinishOperation(opID, false, err.Error())
 			} else {
 				currentOp := opManager.GetOperation(opID)
-				if currentOp != nil {
+			if currentOp != nil {
 					currentOp.Progress = 1.0
-					currentOp.Status = "Завершено успешно"
+					currentOp.Status = i18n.T("op.done")
 					opManager.SetOperation(opID, currentOp)
 				}
 				opManager.FinishOperation(opID, true, "")
@@ -343,10 +344,10 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		progressBar.Widget(),
 		nil, nil, nil,
 		container.NewAdaptiveGrid(4,
-			makeBtn("Запустить", func() {
+			makeBtn(i18n.T("containers.start"), func() {
 				if selectedID != "" {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-						progress.UpdateOperation(selectedID, 0.1, "Запуск...")
+						progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_start"))
 						return wsl.StartContainer(selectedID)
 					}, OpStart)
 				} else {
@@ -366,10 +367,10 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					}, OpStart)
 				}
 			}),
-			makeBtn("Остановить", func() {
+			makeBtn(i18n.T("containers.stop"), func() {
 				if selectedID != "" {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-						progress.UpdateOperation(selectedID, 0.1, "Остановка...")
+						progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_stop"))
 						return wsl.StopContainer(selectedID)
 					}, OpStop)
 				} else {
@@ -391,37 +392,37 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					}, OpStop)
 				}
 			}),
-			makeBtn("Перезапустить", func() {
+			makeBtn(i18n.T("containers.restart"), func() {
 				if selectedID != "" {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-						progress.UpdateOperation(selectedID, 0.1, "Остановка...")
+						progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_stop"))
 						time.Sleep(SleepOperation)
 						err := wsl.StopContainer(selectedID)
 						if err != nil {
 							return err
 						}
-						progress.UpdateOperation(selectedID, 0.5, "Запуск...")
+						progress.UpdateOperation(selectedID, 0.5, i18n.T("containers.progress_start"))
 						time.Sleep(SleepOperation)
 						return wsl.StartContainer(selectedID)
 					}, OpRestart)
 				}
 			}),
-			makeBtn("Удалить", func() {
+			makeBtn(i18n.T("containers.remove"), func() {
 				if selectedID != "" {
-					dialog.ShowConfirm("Удаление", fmt.Sprintf("Удалить контейнер %s?", selectedID), func(ok bool) {
+					dialog.ShowConfirm(i18n.T("containers.remove_title"), i18n.T("containers.confirm_remove", selectedID), func(ok bool) {
 						if ok {
 							asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 								_, err := wsl.RunWSL("nerdctl kill " + wsl.ShellQuote(selectedID) + " 2>/dev/null; echo 'kill_done'")
 								if err != nil {
-									progress.UpdateOperation(selectedID, 0.2, "Внимание: ошибка kill — продолжаем...")
+									progress.UpdateOperation(selectedID, 0.2, i18n.T("containers.progress_kill_warn"))
 								}
-								progress.UpdateOperation(selectedID, 0.6, "Удаление...")
+								progress.UpdateOperation(selectedID, 0.6, i18n.T("containers.progress_remove"))
 								return wsl.RemoveContainer(selectedID)
 							}, OpRemove)
 						}
 					}, win)
 				} else {
-					dialog.ShowConfirm("Удаление всех", "Удалить ВСЕ контейнеры?", func(ok bool) {
+					dialog.ShowConfirm(i18n.T("containers.remove_all_title"), i18n.T("containers.confirm_remove_all"), func(ok bool) {
 						if ok {
 							asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 								containers, err := wsl.ListContainers(true)
@@ -449,21 +450,21 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					}, win)
 				}
 			}),
-			makeBtn("Собрать", func() {
-				radio := widget.NewRadioGroup([]string{"Собрать весь проект", "Только контейнеры (без сборки)"}, nil)
+			makeBtn(i18n.T("containers.build"), func() {
+				radio := widget.NewRadioGroup([]string{i18n.T("containers.build_full"), i18n.T("containers.build_only_run")}, nil)
 				radio.Horizontal = true
-				radio.SetSelected("Собрать весь проект")
+				radio.SetSelected(i18n.T("containers.build_full"))
 
 				content := fyne.NewContainerWithLayout(
 					layout.NewVBoxLayout(),
-					widget.NewLabel("Режим сборки:"),
+					widget.NewLabel(i18n.T("containers.build_mode")),
 					radio,
 				)
 
 				dlg := dialog.NewCustomConfirm(
-					"Сборка и запуск",
-					"Собрать",
-					"Отмена",
+					i18n.T("containers.build_title"),
+					i18n.T("containers.build"),
+					i18n.T("dialogs.cancel"),
 					content,
 					func(ok bool) {
 						if !ok {
@@ -475,7 +476,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								return
 							default:
 							}
-							buildMode := (radio.Selected == "Собрать весь проект")
+							buildMode := (radio.Selected == i18n.T("containers.build_full"))
 
 							wsl.InvalidateWSLCache()
 
@@ -529,7 +530,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								currentOp := opManager.GetOperation(opID)
 								if currentOp != nil {
 									currentOp.Progress = 1.0
-									currentOp.Status = "✅ Сборка завершена успешно"
+									currentOp.Status = i18n.T("containers.build_done")
 									opManager.SetOperation(opID, currentOp)
 								}
 								opManager.FinishOperation(opID, true, "")
@@ -546,10 +547,10 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				)
 				dlg.Show()
 			}),
-			makeBtn("Обновить образ", func() {
+			makeBtn(i18n.T("containers.update_image"), func() {
 				if selectedID == "" {
 					safeUI(func() {
-						dialog.ShowCustom("Выберите контейнер", "ОК", widget.NewLabel("Сначала выберите контейнер для обновления"), win)
+						dialog.ShowCustom(i18n.T("containers.select_first"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("containers.select_first_msg")), win)
 					})
 					return
 				}
@@ -566,43 +567,43 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 				if currentImage == "" {
 					safeUI(func() {
-						dialog.ShowError(fmt.Errorf("не удалось определить образ контейнера"), win)
+						dialog.ShowError(fmt.Errorf(i18n.T("containers.image_detect_error")), win)
 					})
 					return
 				}
 
 				safeUI(func() {
-					dialog.ShowEntryDialog("Введите новый образ", "myapp:latest", func(value string) {
+					dialog.ShowEntryDialog(i18n.T("containers.enter_image"), i18n.T("containers.image_placeholder"), func(value string) {
 						if value == "" {
 							return
 						}
 						newImage := strings.TrimSpace(value)
 
 						asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-							progress.UpdateOperation(selectedID, 0.10, "Остановка контейнера...")
+							progress.UpdateOperation(selectedID, 0.10, i18n.T("containers.progress_stop"))
 							_, stopErr := wsl.RunWSL(fmt.Sprintf("nerdctl stop %s", wsl.ShellQuote(selectedID)))
 							if stopErr != nil {
-								progress.UpdateOperation(selectedID, 0.15, "Внимание: не удалось остановить, продолжаем...")
+								progress.UpdateOperation(selectedID, 0.15, i18n.T("containers.progress_stop_warn"))
 							}
 
-							progress.UpdateOperation(selectedID, 0.20, "Удаление старого контейнера...")
+							progress.UpdateOperation(selectedID, 0.20, i18n.T("containers.progress_remove_old_container"))
 							_, err := wsl.RunWSL(fmt.Sprintf("nerdctl rm -f %s", wsl.ShellQuote(selectedID)))
 							if err != nil {
-								return fmt.Errorf("не удалось удалить контейнер: %w", err)
+								return fmt.Errorf(i18n.T("containers.err_remove_container"), err)
 							}
 
 							if currentImage != newImage {
-								progress.UpdateOperation(selectedID, 0.30, "Удаление старого образа...")
+								progress.UpdateOperation(selectedID, 0.30, i18n.T("containers.progress_remove_old_image"))
 								_, err := wsl.RunWSL(fmt.Sprintf("nerdctl rmi -f %s", wsl.ShellQuote(currentImage)))
 								if err != nil {
-									progress.UpdateOperation(selectedID, 0.35, "Внимание: старый образ не удалён")
+									progress.UpdateOperation(selectedID, 0.35, i18n.T("containers.progress_remove_old_image"))
 								}
 							}
 
-							progress.UpdateOperation(selectedID, 0.40, "Загрузка нового образа...")
+							progress.UpdateOperation(selectedID, 0.40, i18n.T("containers.progress_pull"))
 							pullOut, pullErr := wsl.RunWSL(fmt.Sprintf("nerdctl pull %s", wsl.ShellQuote(newImage)))
 							if pullErr != nil {
-								return fmt.Errorf("не удалось загрузить образ: %w", pullErr)
+								return fmt.Errorf(i18n.T("containers.err_pull_image"), pullErr)
 							}
 
 							if pullOut != "" {
@@ -619,7 +620,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								}
 							}
 
-							progress.UpdateOperation(selectedID, 0.85, "Пересоздание контейнера...")
+							progress.UpdateOperation(selectedID, 0.85, i18n.T("containers.progress_recreate"))
 
 							runCmd := fmt.Sprintf("nerdctl run -d --name %s", wsl.ShellQuote(currentImage))
 
@@ -644,16 +645,16 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 							_, runErr := wsl.RunWSL(runCmd)
 							if runErr != nil {
-								return fmt.Errorf("не удалось пересоздать контейнер: %w", runErr)
+								return fmt.Errorf(i18n.T("containers.err_recreate_container"), runErr)
 							}
 
-							progress.UpdateOperation(selectedID, 0.95, "Обновление завершено!")
+							progress.UpdateOperation(selectedID, 0.95, i18n.T("containers.progress_update_done"))
 							return nil
 						}, OpStart)
 					}, win)
 				})
 			}),
-			makeBtn("Обновить", refresh),
+			makeBtn(i18n.T("containers.refresh"), refresh),
 		),
 	)
 
@@ -672,8 +673,8 @@ func showErrorDialog(win fyne.Window, errMsg string) {
 	scroll.SetMinSize(fyne.NewSize(600, 400))
 
 	dlg := dialog.NewCustomConfirm(
-		"Ошибка сборки",
-		"OK",
+		i18n.T("containers.build_error_title"),
+		i18n.T("dialogs.ok"),
 		"",
 		scroll,
 		func(closed bool) {},

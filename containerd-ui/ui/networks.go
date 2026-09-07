@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"context"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 	var networks []wsl.Network
 	selectedName := ""
-	var details = widget.NewLabel("Выберите сеть для просмотра подключённых контейнеров")
+	var details = widget.NewLabel(i18n.T("networks.select_hint"))
 	details.Wrapping = fyne.TextWrapWord
 
 	list := widget.NewList(
@@ -32,14 +33,14 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 		defer cancel()
 		containers, err := wsl.GetNetworkContainers(ctx, name)
 		if err != nil {
-			details.SetText("Ошибка: " + err.Error())
+			details.SetText(i18n.T("common.error") + ": " + err.Error())
 			return
 		}
 		if len(containers) == 0 {
-			details.SetText("Подключённых контейнеров нет")
+			details.SetText(i18n.T("networks.no_containers"))
 			return
 		}
-		details.SetText("Контейнеры:\n" + strings.Join(containers, "\n"))
+		details.SetText(i18n.T("networks.containers_list") + "\n" + strings.Join(containers, "\n"))
 	}
 
 	list.OnSelected = func(id widget.ListItemID) {
@@ -56,7 +57,7 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 			defer cancel()
 			data, err := wsl.ListNetworks(ctx)
 			if err != nil {
-				details.SetText("Ошибка загрузки сетей: " + err.Error())
+				details.SetText(i18n.T("networks.load_error", err.Error()))
 				return
 			}
 			networks = data
@@ -64,13 +65,13 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 		}()
 	}
 
-	btnCreate := widget.NewButton("Создать сеть", func() {
+	btnCreate := widget.NewButton(i18n.T("networks.create"), func() {
 		nameEntry := widget.NewEntry()
-		nameEntry.SetPlaceHolder("Имя сети")
+		nameEntry.SetPlaceHolder(i18n.T("networks.name_placeholder"))
 		driver := widget.NewSelect([]string{"bridge", "host", "overlay"}, nil)
 		driver.SetSelected("bridge")
 		content := container.NewVBox(nameEntry, driver)
-		dlg := dialog.NewCustomConfirm("Создание сети", "ОК", "Отмена", content, func(ok bool) {
+		dlg := dialog.NewCustomConfirm(i18n.T("networks.create_title"), i18n.T("dialogs.ok"), i18n.T("dialogs.cancel"), content, func(ok bool) {
 			if !ok || strings.TrimSpace(nameEntry.Text) == "" {
 				return
 			}
@@ -78,7 +79,7 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 				ctx, cancel := context.WithCancel(wsl.AppContext())
 				defer cancel()
 				if err := wsl.CreateNetwork(ctx, strings.TrimSpace(nameEntry.Text), driver.Selected); err != nil {
-					details.SetText("Ошибка создания: " + err.Error())
+					details.SetText(i18n.T("networks.create_error", err.Error()))
 					return
 				}
 				refresh()
@@ -87,12 +88,12 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 		dlg.Show()
 	})
 
-	btnRemove := widget.NewButton("Удалить сеть", func() {
+	btnRemove := widget.NewButton(i18n.T("networks.remove"), func() {
 		if selectedName == "" || selectedName == "bridge" || selectedName == "host" || selectedName == "none" {
-			dialog.ShowCustom("Удаление сети", "ОК", widget.NewLabel("Выберите пользовательскую сеть."), win)
+			dialog.ShowCustom(i18n.T("networks.remove_title"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("networks.select_custom")), win)
 			return
 		}
-		dialog.ShowCustomConfirm("Удаление сети", "ОК", "Отмена", widget.NewLabel("Удалить сеть "+selectedName+"?"), func(ok bool) {
+		dialog.ShowCustomConfirm(i18n.T("networks.remove_title"), i18n.T("dialogs.ok"), i18n.T("dialogs.cancel"), widget.NewLabel(i18n.T("networks.confirm_remove", selectedName)), func(ok bool) {
 			if !ok {
 				return
 			}
@@ -100,7 +101,7 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 				ctx, cancel := context.WithCancel(wsl.AppContext())
 				defer cancel()
 				if err := wsl.RemoveNetwork(ctx, selectedName); err != nil {
-					details.SetText("Ошибка удаления: " + err.Error())
+					details.SetText(i18n.T("networks.remove_error", err.Error()))
 					return
 				}
 				selectedName = ""
@@ -109,7 +110,7 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 		}, win)
 	})
 
-	btnRefresh := widget.NewButton("Обновить", refresh)
+	btnRefresh := widget.NewButton(i18n.T("networks.refresh"), refresh)
 	topBar := container.NewAdaptiveGrid(3, btnCreate, btnRemove, btnRefresh)
 	refresh()
 

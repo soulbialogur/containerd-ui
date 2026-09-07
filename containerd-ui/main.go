@@ -1,6 +1,7 @@
 package main
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/ui"
 	"containerd-ui/wsl"
 	"errors"
@@ -28,11 +29,18 @@ func loadIcon(path string) fyne.Resource {
 }
 
 func main() {
-	os.Setenv("FYNE_LOCALE", "ru_RU")
 	config, err := wsl.LoadConfig()
 	if err != nil {
 		config = wsl.DefaultConfig()
 	}
+
+	// Язык интерфейса хранится в config.json (поле language)
+	locale := i18n.LocaleRU
+	if config.Language == "en" {
+		locale = i18n.LocaleEN
+	}
+	i18n.SetLocale(locale)
+
 	wsl.InitConfigCache(config)
 	ui.SetEconomyMode(config.EconomyMode)
 
@@ -47,7 +55,7 @@ func main() {
 		}
 	}
 
-	win := myApp.NewWindow("Containerd UI")
+	win := myApp.NewWindow(i18n.T("app.title"))
 	win.Resize(fyne.NewSize(1100, 700))
 
 	if icon != nil {
@@ -58,7 +66,7 @@ func main() {
 	status := wsl.CheckService()
 	if !status["wsl"].(bool) {
 		dialog.ShowError(
-			errors.New("WSL "+wsl.GetWslDistro()+" не найден. Установите: wsl --install "+wsl.GetWslDistro()),
+			errors.New(i18n.T("app.wsl_not_found", wsl.GetWslDistro(), wsl.GetWslDistro())),
 			win,
 		)
 	}
@@ -76,17 +84,17 @@ func main() {
 	settingsTab := ui.BuildSettingsTab(win)
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Статус", statusTab),
-		container.NewTabItem("Контейнеры", containersTab),
-		container.NewTabItem("Образы", imagesTab),
-		container.NewTabItem("Тома", volumesTab),
-		container.NewTabItem("Сети", networksTab),
-		container.NewTabItem("Ресурсы", resourcesTab),
-		container.NewTabItem("Логи", logsTab),
-		container.NewTabItem("База данных", databaseTab),
-		container.NewTabItem("Очистка", cleanTab),
-		container.NewTabItem("Деплой", deployTab),
-		container.NewTabItem("Настройки", settingsTab),
+		container.NewTabItem(i18n.T("tabs.status"), statusTab),
+		container.NewTabItem(i18n.T("tabs.containers"), containersTab),
+		container.NewTabItem(i18n.T("tabs.images"), imagesTab),
+		container.NewTabItem(i18n.T("tabs.volumes"), volumesTab),
+		container.NewTabItem(i18n.T("tabs.networks"), networksTab),
+		container.NewTabItem(i18n.T("tabs.resources"), resourcesTab),
+		container.NewTabItem(i18n.T("tabs.logs"), logsTab),
+		container.NewTabItem(i18n.T("tabs.database"), databaseTab),
+		container.NewTabItem(i18n.T("tabs.clean"), cleanTab),
+		container.NewTabItem(i18n.T("tabs.deploy"), deployTab),
+		container.NewTabItem(i18n.T("tabs.settings"), settingsTab),
 	)
 
 	tabs.SetTabLocation(container.TabLocationTop)

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 
 	"fyne.io/fyne/v2"
@@ -11,7 +12,7 @@ import (
 func BuildDatabaseTab() fyne.CanvasObject {
 	volName := wsl.GetDBVolumeName()
 
-	lblSize := widget.NewLabel("Размер: —")
+	lblSize := widget.NewLabel(i18n.T("database.size_unknown"))
 
 	var files []string
 	filesList := widget.NewList(
@@ -22,7 +23,7 @@ func BuildDatabaseTab() fyne.CanvasObject {
 		},
 	)
 
-	btnCheck := widget.NewButton("Проверить", func() {
+	btnCheck := widget.NewButton(i18n.T("database.check"), func() {
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
@@ -32,17 +33,17 @@ func BuildDatabaseTab() fyne.CanvasObject {
 
 			size, dbFiles, err := wsl.GetDBInfo(volName)
 			if err == nil {
-				lblSize.SetText("Размер: " + size)
+				lblSize.SetText(i18n.T("database.size", size))
 				files = dbFiles
 				filesList.Refresh()
 			} else {
-				lblSize.SetText("Ошибка: " + err.Error())
+				lblSize.SetText(i18n.T("common.error") + ": " + err.Error())
 			}
 		}()
 	})
 
 	topBar := container.NewHBox(
-		widget.NewLabel("Том:"),
+		widget.NewLabel(i18n.T("database.volume")),
 		widget.NewLabel(volName),
 		btnCheck,
 		lblSize,
