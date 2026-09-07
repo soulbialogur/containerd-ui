@@ -91,8 +91,6 @@ func main() {
 
 	tabs.SetTabLocation(container.TabLocationTop)
 
-	// Обработчик переключения вкладок – останавливаем фоновые тикеры всех вкладок,
-	// затем активируем только выбранную.
 	tabs.OnSelected = func(item *container.TabItem) {
 		ui.DeactivateAllTabs()
 		if item != nil {
@@ -101,7 +99,7 @@ func main() {
 	}
 
 	win.SetOnClosed(func() {
-		ui.StopAllTabs() // останавливаем все тикеры
+		ui.StopAllTabs()
 		wsl.Shutdown()
 	})
 

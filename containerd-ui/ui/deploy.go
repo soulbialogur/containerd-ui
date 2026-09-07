@@ -52,7 +52,6 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 		logs.Refresh()
 	}
 
-	// --- Объявляем переменные ДО использования в proxyOptionsContainer ---
 	proxyHint := widget.NewLabel("💡 Traefik — бесплатный SSL через Let's Encrypt; Cloudflare — через Tunnel, без открытых портов (нужен cloudflared в WSL)")
 	proxyHint.TextStyle = fyne.TextStyle{Italic: true}
 
@@ -145,7 +144,7 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 						}
 						msg += "443"
 					}
-					msg += ". Освободите перед деплоем Traefik"
+					msg += ". Освободите в WSL или Windows (например, IIS) перед деплоем Traefik. Либо выберите Cloudflare Tunnel"
 				}
 				status.SetText(msg)
 			})
@@ -271,11 +270,9 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	})
 	_ = win
 
-	// --- Карточки для группировки ---
 	cardConfig := widget.NewCard("Конфигурация", "", container.NewVBox(
 		container.NewBorder(nil, nil, nil, btnDNS, domainEntry),
 		container.NewHBox(btnPorts, btnTools),
-		// ИСПРАВЛЕНИЕ: Слева метки и чекбоксы, справа — поле ввода (занимает всё свободное место)
 		container.NewBorder(
 			nil, nil,
 			container.NewHBox(

@@ -7,6 +7,7 @@ This is a concise guide to the application, organized by task so you can quickly
 - [Quickstart](quickstart.md) — get the application running from scratch.
 - [Environment Setup](installation.md) — WSL, containerd, nerdctl, BuildKit, and Cloudflare Tunnel.
 - [Configuration](configuration.md) — what `config.json` contains and how to configure a project.
+- [Multi-Project Support](configuration.md#multi-project-support) — manage multiple projects with individual paths and settings.
 - [Domain Deployment](deployment.md) — Traefik, Let's Encrypt, and Cloudflare.
 - [Troubleshooting](troubleshooting.md) — common errors and how to diagnose them.
 - [Core Concepts](concepts.md) — architecture, caching, resource saving, BuildKit, and lifecycle behavior.
@@ -37,7 +38,8 @@ To understand how the application works, start with [concepts.md](concepts.md). 
 - configure WSL and containerd;
 - run Traefik or Cloudflare Tunnel for domain deployment;
 - use two infrastructure access layers: the containerd gRPC API and the WSL + nerdctl fallback;
-- run container operations in parallel with a configurable concurrency limit.
+- run container operations in parallel with a configurable concurrency limit;
+- manage multiple projects: add, rename, remove, and switch between projects from the Settings tab.
 
 ## Two Infrastructure Access Layers
 
@@ -45,7 +47,7 @@ The architecture, cache, and lifecycle are described in detail in [concepts.md](
 
 ## Where Settings Are Stored
 
-Deployment settings, project paths, and environment parameters are stored in `config.json` next to `containerd-ui.exe`. It is the single configuration point for WSL, containers, the proxy, and deployment.
+Deployment settings, project paths, and environment parameters are stored in `config.json` next to `containerd-ui.exe`. It is the single configuration point for WSL, containers, multi-project management, the proxy, and deployment. See [Configuration](configuration.md#multi-project-support) for the multi-project format.
 
 ## Where to Start
 
@@ -91,11 +93,11 @@ How to interpret the data:
 Here is a brief map of the internal architecture:
 
 - `ui/` — the presentation layer: tables, tabs, dialogs, progress bars, and events;
-- `wsl/` — the client layer for WSL, `nerdctl`, `containerd`, `buildkitd`, checks, and caches;
+- `wsl/` — the client layer for WSL, `nerdctl`, `containerd`, `buildkitd`, checks, caches, and multi-project management;
 - `main.go` — UI initialization and tab registration;
 - `CacheManager` — centralized cache invalidation and metrics;
 - `OperationManager` — status and progress tracking for long-running operations;
-- `config.go` — the central `AppConfig` and default values.
+- `config.go` — the central `AppConfig`, `ProjectInfo` structure, and default values.
 
 When changing functionality, start at the UI call site, then follow it into `wsl/*` and check whether it publishes the required cache invalidation event or passes a `cancelCh` cancellation signal.
 
@@ -125,3 +127,23 @@ The Cleanup tab provides six operations:
 6. **Full cleanup** — runs all of the operations above in sequence.
 
 All operations run asynchronously, and their results appear in the UI output area while they run and after they finish.
+
+## Multi-Project Support
+
+The application supports managing multiple projects from a single installation. You can add, rename, remove, and switch between projects directly from the **Settings** tab.
+
+### How It Works
+
+- Each project stores its path and an optional display name.
+- Only one project can be active at a time; all container, image, and deployment operations target the active project.
+- The project list is persisted in `config.json` and survives application restarts.
+- Legacy single-project configuration is automatically migrated to the multi-project format on first load.
+
+### Managing Projects (UI)
+
+1. Open the **Settings** tab.
+2. Scroll to the **Project Management** card.
+3. **Add Project** — click the button, select the folder containing `docker-compose.yml` or `compose.yaml`.
+4. **Switch Project** — click any project in the list to make it active.
+5. **Rename Project** — select a project, click Rename, and enter a display name.
+6. **Remove Project** — select a project, click Remove, and confirm.

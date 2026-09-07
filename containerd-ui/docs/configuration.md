@@ -156,11 +156,74 @@ When `economy_mode` is enabled, inactive tabs pause timers and background reques
 
 These values are generally internal cache and retry parameters. In the current user configuration, treat them as reserved or legacy fields. They are not used by the UI and can be left unchanged; the active settings are described in the main configuration section above.
 
+## Multi-Project Support
+
+The application supports managing multiple projects from a single installation. Instead of a single `project_path`, the configuration stores an array of projects and tracks which one is active.
+
+### Configuration Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `projects` | `ProjectInfo[]` | Array of saved projects |
+| `active_project_path` | `string` | Path of the currently active project |
+| `project_path` | `string` | Legacy field (deprecated, auto-migrated) |
+
+### `ProjectInfo` Structure
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | `string` | Full path to the project folder (must contain `docker-compose.yml` or `compose.yaml`) |
+| `name` | `string` | Display name (optional; falls back to folder name) |
+| `added` | `string` | Date added (RFC3339, informational only) |
+
+### Example Configuration
+
+```json
+{
+  "projects": [
+    {
+      "path": "C:\Users\User\OneDrive\Рабочий стол\ai-chatbot-website",
+      "name": "SoulDialogue",
+      "added": "2025-09-01T12:00:00Z"
+    },
+    {
+      "path": "C:\Users\User\Projects\my-api-service",
+      "name": "My API",
+      "added": "2025-09-02T10:00:00Z"
+    }
+  ],
+  "active_project_path": "C:\Users\User\OneDrive\Рабочий стол\ai-chatbot-website",
+  "wsl_distro": "Ubuntu-24.04",
+  "cd_port": 50051,
+  "cd_namespace": "default"
+}
+```
+
+### Migration from Single-Project
+
+If you have been using the application with a single project, the configuration is automatically migrated on first load:
+
+- The legacy `project_path` field is moved into the `projects` array.
+- If `active_project_path` was not set, the former `project_path` becomes the active project.
+- The `project_path` field is cleared after migration.
+
+You do not need to do anything manually — your existing configuration will continue to work.
+
+### Project Management in the UI
+
+Open the **Settings** tab and scroll to the **Project Management** card.
+
+- **Add Project** — open a folder picker, select the project root (must contain `docker-compose.yml` or `compose.yaml`). The project is added and immediately activated.
+- **Switch Project** — click a project in the list to select it. The path field updates to the selected project.
+- **Rename Project** — select a project, click Rename, and enter a display name. The fallback name (folder name) is used if left empty.
+- **Remove Project** — select a project, click Remove, and confirm. If the removed project was active, the first project in the list becomes active.
+
 ## Change Settings
 
 All settings can be changed from the Settings tab:
 
-- set the project path;
+- manage multiple projects: add, rename, remove, and switch between projects;
+- set the active project path;
 - choose the WSL distribution;
 - change the gRPC port and namespace;
 - configure the proxy and domain settings;
@@ -212,7 +275,7 @@ Detailed behavior and usage scenarios are described in [concepts.md](concepts.md
 
 ## Important Rules
 
-- `project_path` must point to the project root, not to the Compose file;
+- `active_project_path` (or `projects[0]`) must point to the project root, not to the Compose file;
 - Traefik requires ports `80` and `443` to be available;
 - `deploy_service_backend_port` and `deploy_service_frontend_port` must match the containers' actual internal ports;
 - `deployment_proxy` must be `traefik` or `cloudflare`;

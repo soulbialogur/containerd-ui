@@ -41,7 +41,6 @@ func BuildCleanTab() fyne.CanvasObject {
 			strings.Join(lines, "\n")
 	}
 
-	// Кнопка 1: Очистка кэша и dangling-образов
 	btnCache := widget.NewButton("Очистить кэш и dangling-образы", nil)
 	btnCache.OnTapped = func() {
 		safeUI(func() {
@@ -74,7 +73,6 @@ func BuildCleanTab() fyne.CanvasObject {
 		}()
 	}
 
-	// Кнопка 2: Очистка неиспользуемых томов
 	btnVolumes := widget.NewButton("Очистить неиспользуемые тома", nil)
 	btnVolumes.OnTapped = func() {
 		safeUI(func() {
@@ -92,6 +90,11 @@ func BuildCleanTab() fyne.CanvasObject {
 					})
 				}
 			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			res, err := wsl.CleanUnusedVolumes(ctx)
@@ -108,7 +111,6 @@ func BuildCleanTab() fyne.CanvasObject {
 		}()
 	}
 
-	// Кнопка 3: Очистка неиспользуемых сетей
 	btnNetworks := widget.NewButton("Очистить неиспользуемые сети", nil)
 	btnNetworks.OnTapped = func() {
 		safeUI(func() {
@@ -126,6 +128,11 @@ func BuildCleanTab() fyne.CanvasObject {
 					})
 				}
 			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			res, err := wsl.CleanUnusedNetworks(ctx)
@@ -142,7 +149,6 @@ func BuildCleanTab() fyne.CanvasObject {
 		}()
 	}
 
-	// Кнопка 4: Очистка образов без тегов
 	btnImages := widget.NewButton("Очистить образы без тегов", nil)
 	btnImages.OnTapped = func() {
 		safeUI(func() {
@@ -160,6 +166,11 @@ func BuildCleanTab() fyne.CanvasObject {
 					})
 				}
 			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			res, err := wsl.CleanUntaggedImages(ctx)
@@ -176,7 +187,6 @@ func BuildCleanTab() fyne.CanvasObject {
 		}()
 	}
 
-	// Кнопка 5: Очистка кэша BuildKit
 	btnBuildkit := widget.NewButton("Очистить кэш BuildKit", nil)
 	btnBuildkit.OnTapped = func() {
 		safeUI(func() {
@@ -194,6 +204,11 @@ func BuildCleanTab() fyne.CanvasObject {
 					})
 				}
 			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			res, err := wsl.CleanBuildkitCache(ctx)
@@ -210,7 +225,6 @@ func BuildCleanTab() fyne.CanvasObject {
 		}()
 	}
 
-	// Кнопка 6: Полная очистка
 	btnFull := widget.NewButton("Полная очистка (все)", nil)
 	btnFull.OnTapped = func() {
 		safeUI(func() {
@@ -228,32 +242,28 @@ func BuildCleanTab() fyne.CanvasObject {
 					})
 				}
 			}()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 
 			var results []string
 
-			// Очищаем кэш
 			if res, err := wsl.CleanNerdctlCache(); err == nil {
 				results = append(results, "🗑️ Кэш: "+res)
 			}
-
-			// Очищаем тома
 			if res, err := wsl.CleanUnusedVolumes(ctx); err == nil {
 				results = append(results, "📦 Тома: "+res)
 			}
-
-			// Очищаем сети
 			if res, err := wsl.CleanUnusedNetworks(ctx); err == nil {
 				results = append(results, "🌐 Сети: "+res)
 			}
-
-			// Очищаем образы без тегов
 			if res, err := wsl.CleanUntaggedImages(ctx); err == nil {
 				results = append(results, "🖼️ Образы: "+res)
 			}
-
-			// Очищаем кэш BuildKit
 			if res, err := wsl.CleanBuildkitCache(ctx); err == nil {
 				results = append(results, "🔨 BuildKit:\n"+res)
 			}

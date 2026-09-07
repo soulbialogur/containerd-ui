@@ -161,7 +161,34 @@ General practices:
 - long-running actions should pass `cancelCh` and check it at safe points;
 - the UI should read from the cache and update through `safeUI` or a callback rather than directly from background goroutines.
 
-## 7. Further Reading
+## 8. Multi-Project Lifecycle
+
+The application supports multiple projects. Only one project is **active** at a time, and all operations target it.
+
+### How Project Activation Works
+
+1. On startup, `LoadConfig()` calls `EnsureActiveProject()` which:
+   - migrates legacy `project_path` into the `projects` array;
+   - verifies that `active_project_path` points to an existing project;
+   - falls back to the first project in the list if the active one is missing.
+2. `GetProjectPath()` returns the active project path. All WSL commands (compose, build, etc.) use this path.
+3. `GetProjectPathWSL()` converts the Windows path to WSL format (`/mnt/c/...`).
+
+### Switching Projects
+
+When you switch projects from the UI:
+- `SetActiveProject(path)` updates `active_project_path` and persists to `config.json`;
+- the config cache is reloaded;
+- all subsequent operations use the new path.
+
+### Removing Projects
+
+When a project is removed:
+- if it was the active project, the first remaining project becomes active;
+- `config.json` is updated immediately;
+- no files are deleted from disk.
+
+## 9. Further Reading
 
 For practical setup and diagnostic examples, see:
 

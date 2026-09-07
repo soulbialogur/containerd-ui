@@ -14,12 +14,10 @@ func BuildResourcesTab() fyne.CanvasObject {
 	var mu sync.Mutex
 	var refreshLock sync.Mutex
 
-	// Метки для отображения системных ресурсов
 	lblRAM := widget.NewLabel("RAM: —")
 	lblCPU := widget.NewLabel("CPU: —")
 	lblDisk := widget.NewLabel("Диск: —")
 
-	// Стиль для меток
 	setLabelStyle := func(lbl *widget.Label) {
 		lbl.TextStyle = fyne.TextStyle{Bold: true}
 	}
@@ -77,9 +75,6 @@ func BuildResourcesTab() fyne.CanvasObject {
 	table.SetColumnWidth(4, 90)
 	table.SetColumnWidth(5, 55)
 
-	// Обновление — объединённый batch-вызов WSL (исправление #1)
-	// Раньше: 3 отдельных вызова wsl.exe (GetHostResources + GetStats + GetSystemResources)
-	// Теперь: GetSystemResources уже включает RAM/CPU, GetStats — отдельный вызов для stats
 	refresh := func() {
 		if !refreshLock.TryLock() {
 			return
@@ -114,8 +109,6 @@ func BuildResourcesTab() fyne.CanvasObject {
 				default:
 				}
 
-				// GetSystemResources уже кэширует результат на 5 секунд и объединяет
-				// free + nproc + loadavg + df в ОДНОМ вызове wsl.exe
 				if r, err := wsl.GetSystemResources(); err == nil {
 					sysRes = r
 				}
@@ -123,7 +116,6 @@ func BuildResourcesTab() fyne.CanvasObject {
 
 			wg.Wait()
 
-			// Обновляем UI (через safeUI для потокобезопасности)
 			if sysRes != nil {
 				safeUI(func() {
 					lblRAM.SetText("RAM: " + sysRes.RAMUsed + " / " + sysRes.RAMTotal + " (Свободно: " + sysRes.RAMFree + ")")
@@ -144,7 +136,6 @@ func BuildResourcesTab() fyne.CanvasObject {
 		}()
 	}
 
-	// Создаём карточки для отображения системных ресурсов
 	resourceCards := container.NewVBox(
 		container.NewBorder(nil, nil, nil, widget.NewLabelWithStyle("Системные ресурсы", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			container.NewHBox(
@@ -165,20 +156,15 @@ func BuildResourcesTab() fyne.CanvasObject {
 		widget.NewSeparator(),
 	)
 
-	// Добавляем заголовок над таблицей
 	topBar := container.NewBorder(
 		resourceCards,
 		nil, nil, nil,
 		table,
 	)
 
-	// Управляем активностью вкладки: тикер останавливается при скрытии
 	tab := newTabActive(true, TickerResources, refresh)
-
-	// Регистрируем в глобальной карте по имени вкладки
 	registerTabNamed("Ресурсы", tab)
 
-	// Первый запуск при открытии вкладки
 	refresh()
 
 	return withResponsiveScroll(topBar)

@@ -6,7 +6,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// newResponsiveTable keeps the preferred table width available for horizontal scrolling.
 func newResponsiveTable(table *widget.Table, preferredWidths []float32) *fyne.Container {
 	return container.New(&responsiveTableLayout{
 		table:           table,

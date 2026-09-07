@@ -57,6 +57,15 @@ Start-Process .\containerd-ui.exe
 
 After starting the application, open the Settings tab and select the project root containing `compose.yaml` or `docker-compose.yml`.
 
+### Adding Multiple Projects
+
+The application supports multiple projects. You can add, rename, and switch between them from the **Project Management** card in the Settings tab:
+
+1. Click **Add Project** and select the project folder.
+2. The newly added project is activated automatically.
+3. To switch to another project, click it in the list.
+4. You can rename projects with a custom name or leave it empty to use the folder name.
+
 Supported path formats:
 
 - Windows: `C:\Users\User\...`
@@ -155,7 +164,7 @@ In short, updates pause while a tab is inactive, avoiding unnecessary requests t
 Start by checking that:
 
 - WSL is installed and running;
-- the project contains a Compose file;
+- the active project contains a Compose file;
 - services and ports are configured correctly;
 - ports 80 and 443 are available;
 - DNS points to the correct domain;

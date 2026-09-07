@@ -7,33 +7,29 @@ import (
 	"fyne.io/fyne/v2/theme"
 )
 
-// ---------------------------------------------------------------------------
 // Цветовая палитра — современный тёмный дизайн
-// ---------------------------------------------------------------------------
 
 var (
-	bgPrimary     = color.NRGBA{0x0f, 0x11, 0x1a, 0xff} // Фон основной
-	bgSecondary   = color.NRGBA{0x16, 0x1b, 0x28, 0xff} // Фон панелей
-	bgTertiary    = color.NRGBA{0x1e, 0x25, 0x38, 0xff} // Фон карточек / строк
-	bgHover       = color.NRGBA{0x25, 0x2d, 0x42, 0xff} // Hover строк
-	bgActive      = color.NRGBA{0x2a, 0x35, 0x50, 0xff} // Активная строка
+	bgPrimary     = color.NRGBA{0x0f, 0x11, 0x1a, 0xff}
+	bgSecondary   = color.NRGBA{0x16, 0x1b, 0x28, 0xff}
+	bgTertiary    = color.NRGBA{0x1e, 0x25, 0x38, 0xff}
+	bgHover       = color.NRGBA{0x25, 0x2d, 0x42, 0xff}
+	bgActive      = color.NRGBA{0x2a, 0x35, 0x50, 0xff}
 
-	accentPrimary = color.NRGBA{0x6c, 0x5c, 0xe7, 0xff} // Акцент — фиолетовый
-	accentSuccess = color.NRGBA{0x00, 0xb8, 0x94, 0xff} // Успех — бирюзовый
-	accentWarning = color.NRGBA{0xff, 0xc7, 0x00, 0xff} // Предупреждение — янтарный
-	accentDanger  = color.NRGBA{0xff, 0x6b, 0x6b, 0xff} // Опасность — красный
+	accentPrimary = color.NRGBA{0x6c, 0x5c, 0xe7, 0xff}
+	accentSuccess = color.NRGBA{0x00, 0xb8, 0x94, 0xff}
+	accentWarning = color.NRGBA{0xff, 0xc7, 0x00, 0xff}
+	accentDanger  = color.NRGBA{0xff, 0x6b, 0x6b, 0xff}
 
-	textPrimary   = color.NRGBA{0xe8, 0xec, 0xf1, 0xff} // Текст основной
-	textSecondary = color.NRGBA{0x8b, 0x95, 0xa5, 0xff} // Текст вторичный
-	textMuted     = color.NRGBA{0x5a, 0x65, 0x78, 0xff} // Текст приглушённый
+	textPrimary   = color.NRGBA{0xe8, 0xec, 0xf1, 0xff}
+	textSecondary = color.NRGBA{0x8b, 0x95, 0xa5, 0xff}
+	textMuted     = color.NRGBA{0x5a, 0x65, 0x78, 0xff}
 
-	borderColor  = color.NRGBA{0x2a, 0x30, 0x40, 0xff} // Рамки
-	borderAccent = color.NRGBA{0x6c, 0x5c, 0xe7, 0xff} // Акцентная рамка
+	borderColor  = color.NRGBA{0x2a, 0x30, 0x40, 0xff}
+	borderAccent = color.NRGBA{0x6c, 0x5c, 0xe7, 0xff}
 )
 
-// ---------------------------------------------------------------------------
 // Кастомная тёмная тема
-// ---------------------------------------------------------------------------
 
 type darkTheme struct{}
 
