@@ -3,13 +3,14 @@
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Build Status](https://github.com/soulbialogur/containerd-ui/actions/workflows/main.yml/badge.svg)](https://github.com/soulbialogur/containerd-ui/actions)
+
 # 🚀 Containerd UI
 
 **Containerd UI** is a native Windows application (Go + Fyne) that provides a graphical interface for managing containers via WSL2, containerd, nerdctl and BuildKit.
 
 It is built on a two‑layer architecture: the primary channel is the containerd gRPC API, with a fallback to WSL + nerdctl.
 
-The tool is ideal for local development, building, and deploying projects in a Windows environment without having to switch between terminals.
+The tool is ideal for local development, building, and deploying projects in a Windows environment without having to switch between terminals. The interface is available in **English and Russian**.
 
 </div>
 
@@ -18,38 +19,41 @@ The tool is ideal for local development, building, and deploying projects in a W
 ## 🚀 Features
 
 - **Container management**  
-  Start, stop, remove, perform batch operations, and update images without data loss.
+Start, stop, remove, perform batch operations, and update images without data loss.
 
 - **Project building**  
-  Support for `nerdctl compose` with BuildKit, a visual progress bar, and cooperative build cancellation.
+Support for `nerdctl compose` with BuildKit, a visual progress bar, and cooperative build cancellation.
+
+- **Interface localization**  
+Switch between English and Russian in one click from the Settings tab. The choice is stored in `config.json` and survives restarts.
 
 - **Real‑time resource monitoring**  
-  Display CPU, RAM, disk I/O, network I/O, and per‑container statistics.
+Display CPU, RAM, disk I/O, network I/O, and per‑container statistics.
 
 - **Network and volume management**  
-  View, create, and delete networks and volumes with protection against accidental changes to system resources.
+View, create, and delete networks and volumes with protection against accidental changes to system resources.
 
 - **System cleanup**  
-  6 cleanup modes: cache, dangling images, unused volumes/networks, untagged images, BuildKit cache, and a full “general” cleanup.
+6 cleanup modes: cache, dangling images, unused volumes/networks, untagged images, BuildKit cache, and a full “general” cleanup.
 
 - **Deploy to a domain**  
-  Choose between Traefik + Let's Encrypt and Cloudflare Tunnel. Built‑in pre‑deployment diagnostics (DNS checks, port 80/443 availability, tool presence).
+Choose between Traefik + Let's Encrypt and Cloudflare Tunnel. Built‑in pre‑deployment diagnostics (DNS checks, port 80/443 availability, tool presence).
 
 - **Smart caching**  
-  Centralised CacheManager with event‑based invalidation and metric collection (hit rate).
+Centralised CacheManager with event‑based invalidation and metric collection (hit rate).
 
 - **Resource saving**  
-  `economy_mode` automatically disables background updates for inactive tabs.
+`economy_mode` automatically disables background updates for inactive tabs.
 
 - **Environment status**  
-  Instant verification of WSL, containerd, BuildKit, nerdctl, and cloudflared health.
+Instant verification of WSL, containerd, BuildKit, nerdctl, and cloudflared health.
 
 ---
 
 ## ⚙️ System Requirements
 
 - Windows 10/11 with WSL2 installed
-- Ubuntu 24.04 distribution inside WSL
+- A Linux distribution inside WSL — **Ubuntu 24.04 is recommended** (other distributions work too, as long as they support `systemd`)
 - Components installed inside WSL:
   - `containerd`
   - `nerdctl`
@@ -60,9 +64,11 @@ The tool is ideal for local development, building, and deploying projects in a W
 
 ## 🚀 Quick Start
 
-**Install WSL and the distribution**
+**Install WSL and a distribution**
 
 <pre><code>wsl --install Ubuntu-24.04</code></pre>
+
+> Ubuntu 24.04 is the recommended distribution, but any modern distro with `systemd` support will work — just adjust the commands below accordingly.
 
 **Install the container stack inside WSL**
 
@@ -112,7 +118,7 @@ Plain text version: [https://www.gnu.org/licenses/agpl-3.0.txt](https://www.gnu.
 Subject to the terms of the GNU Affero General Public License, this project is also available under a **separate commercial license**. A commercial license may be obtained by written agreement with the copyright holder:
 
 - **Bolsinov Nikita Aleksandrovich**  
-  📧 **soulbialogur@gmail.com**
+📧 **soulbialogur@gmail.com**
 
 The commercial license is an alternative licensing option. It does not modify, restrict, or replace any rights granted by the GNU Affero General Public License. No fee, royalty, or other charge is required to exercise rights granted under the GNU Affero General Public License.
 
