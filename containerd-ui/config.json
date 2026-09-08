@@ -1,7 +1,7 @@
 {
   "language": "ru",
-  "project_path":"C:\\Users\\Пользователь\\OneDrive\\Рабочий стол\\ai-chatbot-website",
-  "wsl_distro": "Ubuntu-24.04",
+  "project_path":"",
+  "wsl_distro": "",
   "cd_port": 50051,
   "cd_namespace": "default",
   "scripts_path": "scripts/containerd",
