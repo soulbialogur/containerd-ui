@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"strings"
 	"time"
@@ -25,7 +26,11 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 			label.Wrapping = fyne.TextTruncate
 
 			if i.Row == 0 {
-				headers := []string{"Имя тома", "Тип", "Точка монтирования"}
+				headers := []string{
+					i18n.T("volumes.header_name"),
+					i18n.T("volumes.header_type"),
+					i18n.T("volumes.header_mount"),
+				}
 				label.SetText(headers[i.Col])
 				label.TextStyle = fyne.TextStyle{Bold: true}
 				return
@@ -55,7 +60,6 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 	table.SetColumnWidth(1, 60)
 	table.SetColumnWidth(2, 140)
 
-	// Debounce для refresh — защита от частых вызовов
 	var refreshTimer *time.Timer
 	var lastRefresh time.Time
 
@@ -92,36 +96,47 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 		}
 	}
 
-	btnRemove := widget.NewButton("Удалить том", func() {
+	btnRemove := widget.NewButton(i18n.T("volumes.remove"), func() {
 		if selectedName != "" {
 			if strings.HasPrefix(selectedName, "soul-dialogue-") {
-				dialog.ShowCustom("Защита", "ОК", widget.NewLabel("Нельзя удалить системный том!"), win)
+				dialog.ShowCustom(
+					i18n.T("volumes.protected_title"),
+					i18n.T("dialogs.ok"),
+					widget.NewLabel(i18n.T("volumes.protected_msg")),
+					win,
+				)
 				return
 			}
-			dialog.ShowConfirm("Удаление", "Удалить том "+selectedName+"?", func(ok bool) {
-				if ok {
-					go func() {
-						select {
-						case <-wsl.AppContext().Done():
-							return
-						default:
-						}
+			dialog.ShowConfirm(
+				i18n.T("volumes.remove_title"),
+				i18n.T("volumes.confirm_remove", selectedName),
+				func(ok bool) {
+					if ok {
+						go func() {
+							select {
+							case <-wsl.AppContext().Done():
+								return
+							default:
+							}
 
-						wsl.RemoveVolume(selectedName)
-						data, err := wsl.ListVolumes()
-						if err == nil {
-							volumes = data
-							safeUI(func() {
-								table.Refresh()
-							})
-						}
-					}()
-					selectedName = ""
-				}
-			}, win)
+							wsl.RemoveVolume(selectedName)
+							data, err := wsl.ListVolumes()
+							if err == nil {
+								volumes = data
+								safeUI(func() {
+									table.Refresh()
+								})
+							}
+						}()
+						selectedName = ""
+					}
+				},
+				win,
+			)
 		}
 	})
-	btnRefresh := widget.NewButton("Обновить", refresh)
+
+	btnRefresh := widget.NewButton(i18n.T("volumes.refresh"), refresh)
 
 	topBar := container.NewHBox(btnRemove, btnRefresh)
 	refresh()

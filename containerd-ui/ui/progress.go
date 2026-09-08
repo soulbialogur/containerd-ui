@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"containerd-ui/i18n"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
@@ -23,17 +25,17 @@ const (
 func (ot OperationType) String() string {
 	switch ot {
 	case OpStart:
-		return "Запуск контейнера"
+		return i18n.T("op.start")
 	case OpStop:
-		return "Остановка контейнера"
+		return i18n.T("op.stop")
 	case OpRestart:
-		return "Перезапуск контейнера"
+		return i18n.T("op.restart")
 	case OpRemove:
-		return "Удаление контейнера"
+		return i18n.T("op.remove")
 	case OpBuild:
-		return "Сборка проекта"
+		return i18n.T("op.build")
 	default:
-		return "Неизвестная операция"
+		return i18n.T("op.unknown")
 	}
 }
 
@@ -87,7 +89,7 @@ func (om *OperationManager) RemoveOperation(id string) {
 func (om *OperationManager) StartOperation(id string, opType OperationType) string {
 	op := &OperationProgress{
 		Type:     opType,
-		Status:   "Выполняется...",
+		Status:   i18n.T("op.in_progress"),
 		Progress: 0.0,
 		Finished: false,
 	}
@@ -121,9 +123,9 @@ func (om *OperationManager) FinishOperation(id string, success bool, errMsg stri
 	op.Finished = true
 	op.FinishedAt = time.Now()
 	if success {
-		op.Status = "Завершено успешно"
+		op.Status = i18n.T("op.done")
 	} else {
-		op.Status = "Ошибка: " + errMsg
+		op.Status = i18n.T("op.error", errMsg)
 		op.Error = nil
 	}
 	om.SetOperation(id, op)
@@ -187,7 +189,7 @@ func NewProgressBarComponent() *ProgressBarComponent {
 	}
 	label := widget.NewLabel("")
 	label.TextStyle = fyne.TextStyle{Bold: true}
-	cancel := widget.NewButton("Отмена", func() {})
+	cancel := widget.NewButton(i18n.T("dialogs.cancel"), func() {})
 	cancel.Hide()
 	closeBtn := widget.NewButton("✕", func() {})
 	closeBtn.Hide()

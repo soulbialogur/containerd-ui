@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"sync"
 
@@ -14,9 +15,9 @@ func BuildResourcesTab() fyne.CanvasObject {
 	var mu sync.Mutex
 	var refreshLock sync.Mutex
 
-	lblRAM := widget.NewLabel("RAM: —")
-	lblCPU := widget.NewLabel("CPU: —")
-	lblDisk := widget.NewLabel("Диск: —")
+	lblRAM := widget.NewLabel(i18n.T("resources.ram", "—", "—", "—"))
+	lblCPU := widget.NewLabel(i18n.T("resources.cpu_info", "—", "—"))
+	lblDisk := widget.NewLabel(i18n.T("resources.disk_info", "—", "—", "—"))
 
 	setLabelStyle := func(lbl *widget.Label) {
 		lbl.TextStyle = fyne.TextStyle{Bold: true}
@@ -39,7 +40,14 @@ func BuildResourcesTab() fyne.CanvasObject {
 			label.Wrapping = fyne.TextTruncate
 
 			if i.Row == 0 {
-				headers := []string{"ID", "Имя", "CPU %", "Память", "Сеть I/O", "Потоки"}
+				headers := []string{
+					i18n.T("containers.id"),
+					i18n.T("containers.name"),
+					i18n.T("resources.cpu_percent"),
+					i18n.T("resources.memory"),
+					i18n.T("resources.net_io"),
+					i18n.T("resources.pids"),
+				}
 				label.SetText(headers[i.Col])
 				label.TextStyle = fyne.TextStyle{Bold: true}
 				return
@@ -118,9 +126,9 @@ func BuildResourcesTab() fyne.CanvasObject {
 
 			if sysRes != nil {
 				safeUI(func() {
-					lblRAM.SetText("RAM: " + sysRes.RAMUsed + " / " + sysRes.RAMTotal + " (Свободно: " + sysRes.RAMFree + ")")
-					lblCPU.SetText("CPU: " + sysRes.CPUCores + " ядер | Загрузка: " + sysRes.CPULoad)
-					lblDisk.SetText("Диск: " + sysRes.DiskUsed + " / " + sysRes.DiskTotal + " (Свободно: " + sysRes.DiskFree + ")")
+					lblRAM.SetText(i18n.T("resources.ram", sysRes.RAMUsed, sysRes.RAMTotal, sysRes.RAMFree))
+					lblCPU.SetText(i18n.T("resources.cpu_info", sysRes.CPUCores, sysRes.CPULoad))
+					lblDisk.SetText(i18n.T("resources.disk_info", sysRes.DiskUsed, sysRes.DiskTotal, sysRes.DiskFree))
 				})
 			}
 
@@ -137,18 +145,18 @@ func BuildResourcesTab() fyne.CanvasObject {
 	}
 
 	resourceCards := container.NewVBox(
-		container.NewBorder(nil, nil, nil, widget.NewLabelWithStyle("Системные ресурсы", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewBorder(nil, nil, nil, widget.NewLabelWithStyle(i18n.T("resources.title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			container.NewHBox(
 				container.NewVBox(
-					widget.NewLabelWithStyle("Оперативная память", fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
+					widget.NewLabelWithStyle(i18n.T("resources.ram_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
 					lblRAM,
 				),
 				container.NewVBox(
-					widget.NewLabelWithStyle("Процессор", fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
+					widget.NewLabelWithStyle(i18n.T("resources.cpu_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
 					lblCPU,
 				),
 				container.NewVBox(
-					widget.NewLabelWithStyle("Диск (/)", fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
+					widget.NewLabelWithStyle(i18n.T("resources.disk_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
 					lblDisk,
 				),
 			),
@@ -163,7 +171,7 @@ func BuildResourcesTab() fyne.CanvasObject {
 	)
 
 	tab := newTabActive(true, TickerResources, refresh)
-	registerTabNamed("Ресурсы", tab)
+	registerTabNamed(i18n.T("tabs.resources"), tab)
 
 	refresh()
 

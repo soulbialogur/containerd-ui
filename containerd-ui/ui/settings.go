@@ -1,8 +1,8 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,9 +58,41 @@ func deploymentProxyConfigValue(uiValue string) string {
 func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	config, _ := wsl.LoadConfig()
 
-	entryProjectName := makeSettingEntry("Имя проекта (необязательно)")
+	// --- Переключатель языка ---
+	langRadio := widget.NewRadioGroup([]string{i18n.T("app.lang_ru"), i18n.T("app.lang_en")}, nil)
+	langRadio.Horizontal = true
+	currentLang := i18n.GetCurrentLocale()
+	if currentLang == i18n.LocaleEN {
+		langRadio.SetSelected(i18n.T("app.lang_en"))
+	} else {
+		langRadio.SetSelected(i18n.T("app.lang_ru"))
+	}
+	langRadio.OnChanged = func(value string) {
+		var locale i18n.Locale
+		if value == i18n.T("app.lang_en") {
+			locale = i18n.LocaleEN
+		} else {
+			locale = i18n.LocaleRU
+		}
+		i18n.SetLocale(locale)
+		// Сохраняем язык в config.json
+		cfg, err := wsl.LoadConfig()
+		if err == nil {
+			cfg.Language = string(locale)
+			wsl.SaveConfig(cfg)
+		}
+		// Перезапускаем приложение для применения языка
+		dlg := dialog.NewCustom(i18n.T("settings.lang_restart"), i18n.T("dialogs.ok"),
+			widget.NewLabel(i18n.T("settings.lang_restart_msg")), win)
+		dlg.Show()
+		wsl.Shutdown()
+	}
+	langHint := widget.NewLabel(i18n.T("settings.lang_hint"))
+	langHint.TextStyle = fyne.TextStyle{Italic: true}
 
-	entryPath := makeSettingEntry("Путь к папке с docker-compose.yml")
+	entryProjectName := makeSettingEntry(i18n.T("settings.project_name_placeholder"))
+
+	entryPath := makeSettingEntry(i18n.T("settings.project_path_placeholder"))
 	entryPath.SetText(wsl.GetActiveProjectPath())
 	entryPath.OnChanged = func(text string) {
 		projects := wsl.GetProjects()
@@ -90,9 +122,9 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		},
 	)
 
-	btnAddProject := widget.NewButton("➕ Добавить проект", nil)
-	btnRemoveProject := widget.NewButton("🗑️ Удалить проект", nil)
-	btnRenameProject := widget.NewButton("✏️ Переименовать", nil)
+	btnAddProject := widget.NewButton(i18n.T("settings.add_project"), nil)
+	btnRemoveProject := widget.NewButton(i18n.T("settings.remove_project"), nil)
+	btnRenameProject := widget.NewButton(i18n.T("settings.rename_project"), nil)
 
 	var selectedProjectPath string
 
@@ -141,15 +173,15 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 	btnRemoveProject.OnTapped = func() {
 		if selectedProjectPath == "" {
-			dialog.ShowInformation("Не выбрано", "Выберите проект для удаления из списка.", win)
+			dialog.ShowInformation(i18n.T("dialogs.warning"), i18n.T("settings.no_selection_remove"), win)
 			return
 		}
 
 		confirmDialog := dialog.NewCustomConfirm(
-			"Удалить проект",
-			"Удалить",
-			"Отмена",
-			widget.NewLabel("Удалить проект из списка?\nЭто не удалит файлы с диска.\n\n"+selectedProjectPath),
+			i18n.T("settings.confirm_remove_project"),
+			i18n.T("settings.remove_project"),
+			i18n.T("dialogs.cancel"),
+			widget.NewLabel(i18n.T("settings.confirm_remove_project_text")+selectedProjectPath),
 			func(confirmed bool) {
 				if !confirmed {
 					return
@@ -162,7 +194,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				entryPath.SetText(wsl.GetActiveProjectPath())
 				entryProjectName.SetText("")
 				updateProjectsList()
-				dialog.ShowCustom("Удалено", "ОК", widget.NewLabel("Проект удалён из списка"), win)
+				dialog.ShowCustom(i18n.T("settings.project_removed"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.project_removed_msg")), win)
 			},
 			win,
 		)
@@ -171,15 +203,15 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 	btnRenameProject.OnTapped = func() {
 		if selectedProjectPath == "" {
-			dialog.ShowInformation("Не выбрано", "Выберите проект для переименования.", win)
+			dialog.ShowInformation(i18n.T("dialogs.warning"), i18n.T("settings.no_selection_rename"), win)
 			return
 		}
 
 		renameEntry := widget.NewEntry()
-		renameEntry.SetPlaceHolder("Новое имя проекта")
+		renameEntry.SetPlaceHolder(i18n.T("settings.rename_placeholder"))
 		renameEntry.SetText(wsl.ActiveProject().NameWithFallback())
 
-		dlg := dialog.NewCustomConfirm("Переименовать", "Переименовать", "Отмена", renameEntry, func(ok bool) {
+		dlg := dialog.NewCustomConfirm(i18n.T("settings.rename"), i18n.T("settings.rename"), i18n.T("dialogs.cancel"), renameEntry, func(ok bool) {
 			if !ok || renameEntry.Text == "" {
 				return
 			}
@@ -188,7 +220,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				return
 			}
 			updateProjectsList()
-			dialog.ShowCustom("Переименовано", "ОК", widget.NewLabel("Проект переименован"), win)
+			dialog.ShowCustom(i18n.T("settings.renamed"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.renamed_msg")), win)
 		}, win)
 		dlg.Show()
 	}
@@ -205,55 +237,28 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		_ = id
 	}
 
-	entryDistro := makeSettingEntry("Имя WSL-дистрибутива")
-	entryDistro.SetText(config.WslDistro)
+	entryDistro := makeSettingEntry(i18n.T("settings.wsl_distro_placeholder"))
+	entryCdPort := makeSettingEntry(i18n.T("settings.grpc_port_placeholder"))
+	entryCdNamespace := makeSettingEntry(i18n.T("settings.namespace_placeholder"))
+	entryLogTail := makeSettingEntry(i18n.T("settings.log_tail_placeholder"))
+	entryCacheTTL := makeSettingEntry(i18n.T("settings.cache_ttl_placeholder"))
+	entryMaxWSLCacheSize := makeSettingEntry(i18n.T("settings.max_cache_size_placeholder"))
+	entryWSLCacheCleanupAt := makeSettingEntry(i18n.T("settings.cache_cleanup_placeholder"))
+	entryRefreshInterval := makeSettingEntry(i18n.T("settings.auto_refresh_placeholder"))
+	entryIdleStopMinutes := makeSettingEntry(i18n.T("settings.idle_stop_placeholder"))
 
-	entryCdPort := makeSettingEntry("Порт gRPC-прокси")
-	entryCdPort.SetText(strconv.Itoa(config.CdPort))
-
-	entryCdNamespace := makeSettingEntry("Namespace containerd")
-	entryCdNamespace.SetText(config.CdNamespace)
-
-	entryLogTail := makeSettingEntry("Количество строк логов")
-	entryLogTail.SetText(strconv.Itoa(config.LogTail))
-
-	entryCacheTTL := makeSettingEntry("TTL кэша WSL (сек)")
-	entryCacheTTL.SetText(strconv.Itoa(config.WslCacheTTL))
-
-	entryMaxWSLCacheSize := makeSettingEntry("Максимальный размер кэша WSL (байт)")
-	entryMaxWSLCacheSize.SetText(strconv.FormatInt(config.MaxWSLCacheSize, 10))
-
-	entryWSLCacheCleanupAt := makeSettingEntry("Порог очистки кэша WSL (записей)")
-	entryWSLCacheCleanupAt.SetText(strconv.Itoa(config.WSLCacheCleanupAt))
-
-	entryRefreshInterval := makeSettingEntry("Интервал обновления (сек)")
-	entryRefreshInterval.SetText(strconv.Itoa(config.AutoRefreshInterval))
-
-	entryIdleStopMinutes := makeSettingEntry("Автоостановка демона после простоя (мин)")
-	entryIdleStopMinutes.SetText(strconv.Itoa(config.IdleDaemonStopMinutes))
-
-	checkEconomyMode := widget.NewCheck("Режим экономии ресурсов", nil)
+	checkEconomyMode := widget.NewCheck(i18n.T("settings.economy_mode"), nil)
 	checkEconomyMode.SetChecked(config.EconomyMode)
 
-	entryCPU := makeSettingEntry("Лимит CPU (например: 0.5, 1.5, 2)")
-	entryCPU.SetText(config.DefaultCPU)
-
-	entryMemory := makeSettingEntry("Лимит памяти (например: 512m, 1g, 2g)")
-	entryMemory.SetText(config.DefaultMemory)
-
-	entryMaxParallel := makeSettingEntry("Параллельные сборки (0 = без ограничений)")
-	entryMaxParallel.SetText(strconv.Itoa(config.MaxParallelism))
-
-	entryContainerConcurrency := makeSettingEntry("Параллельные операции контейнеров")
-	entryContainerConcurrency.SetText(strconv.Itoa(config.ContainerOperationConcurrency))
-
-	entryBuildkitTTL := makeSettingEntry("Очистка кэша старше (часов, 0 = отключено)")
-	entryBuildkitTTL.SetText(strconv.Itoa(config.BuildkitCacheTTL))
-
-	entryBuildkitSize := makeSettingEntry("Макс. размер кэша (например: 5g, 10g)")
+	entryCPU := makeSettingEntry(i18n.T("settings.cpu_placeholder"))
+	entryMemory := makeSettingEntry(i18n.T("settings.memory_placeholder"))
+	entryMaxParallel := makeSettingEntry(i18n.T("settings.parallel_builds_placeholder"))
+	entryContainerConcurrency := makeSettingEntry(i18n.T("settings.container_concurrency_placeholder"))
+	entryBuildkitTTL := makeSettingEntry(i18n.T("settings.buildkit_ttl_placeholder"))
+	entryBuildkitSize := makeSettingEntry(i18n.T("settings.buildkit_max_size_placeholder"))
 	entryBuildkitSize.SetText(config.BuildkitMaxSize)
 
-	proxyRadio := widget.NewRadioGroup([]string{"Traefik + Let's Encrypt", "Cloudflare Tunnel"}, nil)
+	proxyRadio := widget.NewRadioGroup([]string{i18n.T("deploy.traefik"), i18n.T("deploy.cloudflare")}, nil)
 	proxyRadio.Horizontal = true
 	proxyRadio.SetSelected(deploymentProxyUIValue(config.DeploymentProxy))
 	if config.DeploymentProxy == "" || (config.DeploymentProxy != "traefik" && config.DeploymentProxy != "cloudflare") {
@@ -262,45 +267,45 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	proxyHint := widget.NewLabel("💡 Traefik — бесплатный SSL через Let's Encrypt; Cloudflare — через Tunnel, без открытых портов")
 	proxyHint.TextStyle = fyne.TextStyle{Italic: true}
 
-	entryBackendService := makeSettingEntry("Имя сервиса backend (в docker-compose.yml)")
+	entryBackendService := makeSettingEntry(i18n.T("settings.backend_service_placeholder"))
 	entryBackendService.SetText(config.DeployServiceBackend)
 	if config.DeployServiceBackend == "" {
 		entryBackendService.SetText("backend")
 	}
 
-	entryBackendPort := makeSettingEntry("Порт backend для маршрутизации")
+	entryBackendPort := makeSettingEntry(i18n.T("settings.backend_port"))
 	entryBackendPort.SetText(strconv.Itoa(config.DeployServiceBackendPort))
 	if config.DeployServiceBackendPort == 0 {
 		entryBackendPort.SetText("8000")
 	}
 
-	entryDeployEmail := makeSettingEntry("Email для Let's Encrypt")
-	entryDeployEmail.SetPlaceHolder("admin@your-domain.com")
+	entryDeployEmail := makeSettingEntry(i18n.T("settings.deploy_email"))
+	entryDeployEmail.SetPlaceHolder(i18n.T("settings.deploy_email_placeholder"))
 	if config.DeployEmail != "" {
 		entryDeployEmail.SetText(config.DeployEmail)
 	}
 
-	entryDeployNetwork := makeSettingEntry("Имя внешней сети для деплоя")
+	entryDeployNetwork := makeSettingEntry(i18n.T("settings.deploy_network_placeholder"))
 	entryDeployNetwork.SetText(config.DeployNetwork)
 	if config.DeployNetwork == "" {
 		entryDeployNetwork.SetText("soul-dialogue")
 	}
 
-	entryFrontendService := makeSettingEntry("Имя сервиса frontend (в docker-compose.yml)")
+	entryFrontendService := makeSettingEntry(i18n.T("settings.frontend_service_placeholder"))
 	entryFrontendService.SetText(config.DeployServiceFrontend)
 	if config.DeployServiceFrontend == "" {
 		entryFrontendService.SetText("frontend")
 	}
 
-	entryFrontendPort := makeSettingEntry("Порт frontend для маршрутизации")
+	entryFrontendPort := makeSettingEntry(i18n.T("settings.frontend_port"))
 	entryFrontendPort.SetText(strconv.Itoa(config.DeployServiceFrontendPort))
 	if config.DeployServiceFrontendPort == 0 {
 		entryFrontendPort.SetText("80")
 	}
-	serviceHint := widget.NewLabel("💡 Должны совпадать с именами сервисов и портами внутри docker-compose.yml")
+	serviceHint := widget.NewLabel(i18n.T("settings.project_name_hint"))
 	serviceHint.TextStyle = fyne.TextStyle{Italic: true}
 
-	checkSquash := widget.NewCheck("Объединить слои (--squash)", nil)
+	checkSquash := widget.NewCheck(i18n.T("settings.squash_layers"), nil)
 	checkSquash.SetChecked(config.SquashLayers)
 
 	compressionRadio := widget.NewRadioGroup([]string{"gzip", "zstd", "none"}, nil)
@@ -315,10 +320,10 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	} else {
 		compressionLevel.Disable()
 	}
-	compressionLevelLabel := widget.NewLabel(fmt.Sprintf("Уровень сжатия: %.0f", float64(config.CompressionLevel)))
+	compressionLevelLabel := widget.NewLabel(i18n.T("settings.compression_level", float64(config.CompressionLevel)))
 
 	compressionLevel.OnChanged = func(value float64) {
-		compressionLevelLabel.SetText(fmt.Sprintf("Уровень сжатия: %.0f", value))
+		compressionLevelLabel.SetText(i18n.T("settings.compression_level", value))
 	}
 
 	compressionRadio.OnChanged = func(value string) {
@@ -329,11 +334,11 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		}
 	}
 
-	btnOpenExplorer := widget.NewButton("📁 Открыть проводник", nil)
-	btnCheckPath := widget.NewButton("✅ Проверить путь", nil)
-	btnDetect := widget.NewButton("🔍 Автоопределение", nil)
-	btnSave := widget.NewButton("💾 Сохранить", nil)
-	btnReset := widget.NewButton("🔄 Сбросить", nil)
+	btnOpenExplorer := widget.NewButton(i18n.T("settings.open_explorer"), nil)
+	btnCheckPath := widget.NewButton(i18n.T("settings.check_path"), nil)
+	btnDetect := widget.NewButton(i18n.T("settings.auto_detect"), nil)
+	btnSave := widget.NewButton(i18n.T("settings.save"), nil)
+	btnReset := widget.NewButton(i18n.T("settings.reset"), nil)
 
 	updateUI := func() {
 		cfg, _ := wsl.LoadConfig()
@@ -357,7 +362,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		checkSquash.SetChecked(cfg.SquashLayers)
 		compressionRadio.SetSelected(cfg.Compression)
 		compressionLevel.SetValue(float64(cfg.CompressionLevel))
-		compressionLevelLabel.SetText(fmt.Sprintf("Уровень сжатия: %.0f", float64(cfg.CompressionLevel)))
+		compressionLevelLabel.SetText(i18n.T("settings.compression_level", float64(cfg.CompressionLevel)))
 		if cfg.Compression == "gzip" || cfg.Compression == "zstd" {
 			compressionLevel.Enable()
 		} else {
@@ -391,7 +396,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	btnCheckPath.OnTapped = func() {
 		path := entryPath.Text
 		if path == "" {
-			dialog.ShowInformation("Нет пути", "Сначала введите путь в поле выше.", win)
+			dialog.ShowInformation(i18n.T("dialogs.warning"), i18n.T("settings.no_path_msg"), win)
 			return
 		}
 
@@ -399,7 +404,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 		dirInfo, err := os.Stat(path)
 		if err != nil || !dirInfo.IsDir() {
-			dialog.ShowCustom("Ошибка", "ОК", widget.NewLabel(fmt.Sprintf("Папка не найдена: %s\n%s", path, err)), win)
+			dialog.ShowCustom(i18n.T("settings.path_not_found"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.path_not_found_msg", path, err)), win)
 			return
 		}
 
@@ -414,19 +419,19 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		}
 
 		if composeExists {
-			dialog.ShowCustom("Путь проверен", "ОК",
-				widget.NewLabel(fmt.Sprintf("✅ Путь корректен:\n%s\n\nНайден файл docker-compose.yml или compose.yaml", path)),
+			dialog.ShowCustom(i18n.T("settings.path_checked_ok"), i18n.T("dialogs.ok"),
+				widget.NewLabel(i18n.T("settings.path_ok", path)),
 				win)
 		} else {
-			dialog.ShowCustom("Путь проверен", "ОК",
-				widget.NewLabel(fmt.Sprintf("⚠️ Папка найдена:\n%s\n\nНО не найден docker-compose.yml или compose.yaml\n\nПроект может быть настроен иначе.", path)),
+			dialog.ShowCustom(i18n.T("settings.path_checked_warn"), i18n.T("dialogs.ok"),
+				widget.NewLabel(i18n.T("settings.path_warn", path)),
 				win)
 		}
 	}
 
 	btnDetect.OnTapped = func() {
 		btnDetect.Disable()
-		btnDetect.SetText("🔍 Поиск...")
+		btnDetect.SetText(i18n.T("settings.searching"))
 		btnDetect.Refresh()
 
 		go func() {
@@ -443,13 +448,13 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 					dialog.ShowError(err, win)
 				} else {
 					updateUI()
-					dialog.ShowCustom("Найдено", "ОК", widget.NewLabel("Проект найден: "+path), win)
+					dialog.ShowCustom(i18n.T("settings.detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.detected_msg", path)), win)
 				}
 			} else {
-				dialog.ShowCustom("Не найдено", "ОК", widget.NewLabel("Не удалось автоматически определить путь к проекту. Укажите вручную."), win)
+				dialog.ShowCustom(i18n.T("settings.not_detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.not_detected_msg")), win)
 			}
 			btnDetect.Enable()
-			btnDetect.SetText("🔍 Автоопределение")
+			btnDetect.SetText("🔍 " + i18n.T("settings.auto_detect"))
 			btnDetect.Refresh()
 		}()
 	}
@@ -558,15 +563,15 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		if cfg.IdleDaemonStopMinutes > 0 {
 			wsl.SetIdleDaemonThresholdForRuntime(cfg.IdleDaemonStopMinutes)
 		}
-		dialog.ShowCustom("Сохранено", "ОК", widget.NewLabel("Конфигурация успешно сохранена в config.json"), win)
+		dialog.ShowCustom(i18n.T("settings.saved"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.saved_hint")), win)
 	}
 
 	btnReset.OnTapped = func() {
 		confirmDialog := dialog.NewCustomConfirm(
-			"Сброс",
-			"ОК",
-			"Отмена",
-			widget.NewLabel("Сбросить все настройки к значениям по умолчанию?"),
+			i18n.T("settings.confirm_reset"),
+			i18n.T("settings.reset"),
+			i18n.T("dialogs.cancel"),
+			widget.NewLabel(i18n.T("settings.confirm_reset_text")),
 			func(confirmed bool) {
 				if !confirmed {
 					return
@@ -579,172 +584,148 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				wsl.InitConfigCache(cfg)
 				SetEconomyMode(cfg.EconomyMode)
 				updateUI()
-				dialog.ShowCustom("Сброшено", "ОК", widget.NewLabel("Настройки сброшены к значениям по умолчанию"), win)
+				dialog.ShowCustom(i18n.T("settings.reset_done"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.reset_hint")), win)
 			},
 			win,
 		)
 		confirmDialog.Show()
 	}
 
-	infoText := "Здесь можно настроить все параметры приложения.\n\n" +
-		"📁 Путь к проекту — откройте проводник, скопируйте путь и вставьте в поле\n" +
-		"✅ Проверить путь — проверит существование папки и наличие docker-compose.yml\n" +
-		"🔍 Автоопределение — автоматически найти docker-compose.yml\n" +
-		"🐧 WSL-дистрибутив — имя дистрибутива WSL (по умолчанию: Ubuntu-24.04)\n" +
-		"🔌 gRPC-порт — порт для подключения к containerd\n" +
-		"📝 Лог-тайл — количество строк логов при отображении\n" +
-		"⏱️ TTL кэша — время жизни кэша WSL-команд (сек)\n" +
-		"🔄 Автообновление — интервал обновления списка контейнеров (сек)\n\n" +
-		"⚙️ Сборка образов:\n" +
-		"  📦 --squash — объединяет все слои в один (уменьшает размер)\n" +
-		"  🗜️ --compression — алгоритм сжатия (gzip, zstd, none)\n" +
-		"  🎚️ --compression-level — уровень сжатия 1-9 (9 = максимальное)\n\n" +
-		"Файл конфигурации: config.json (в папке с приложением)"
-
-	infoLabel := widget.NewLabel(infoText)
+	infoLabel := widget.NewLabel(i18n.T("settings.info_text"))
 	infoLabel.Wrapping = fyne.TextTruncate
 
-	basicCard := widget.NewCard("Основные настройки", "",
+	basicCard := widget.NewCard(i18n.T("settings.basic"), "",
 		container.NewVBox(
-			widget.NewLabelWithStyle("Путь к проекту", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.project_path"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryPath),
 			container.NewHBox(btnOpenExplorer, btnCheckPath, btnDetect),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("WSL-дистрибутив", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.wsl_distro"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryDistro),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("gRPC-порт containerd", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.grpc_port"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryCdPort),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("Namespace containerd", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.namespace"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryCdNamespace),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("Количество строк логов", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.log_tail"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryLogTail),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("TTL кэша WSL (секунды)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.cache_ttl"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryCacheTTL),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("Максимальный размер кэша WSL (байт)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.max_cache_size"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryMaxWSLCacheSize),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("Порог очистки кэша WSL (записей)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.cache_cleanup"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryWSLCacheCleanupAt),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle("Интервал автообновления (секунды)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.auto_refresh"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryRefreshInterval),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Автоостановка демона после простоя (минуты)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.idle_stop"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryIdleStopMinutes),
 		),
 	)
 
-	buildCard := widget.NewCard("Настройки сборки образов", "",
+	buildCard := widget.NewCard(i18n.T("settings.build"), "",
 		container.NewVBox(
 			checkSquash,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Алгоритм сжатия", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.compression"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			compressionRadio,
 			container.NewHBox(compressionLevel, compressionLevelLabel),
 			container.NewHBox(
-				widget.NewLabel("💡 zstd — более эффективный, чем gzip"),
+				widget.NewLabel(i18n.T("settings.compression_hint")),
 			),
 		),
 	)
 
-	cpuHint := widget.NewLabel("💡 0.5 = 50% CPU, 2 = 2 ядра")
+	cpuHint := widget.NewLabel(i18n.T("settings.cpu_hint"))
 	cpuHint.TextStyle = fyne.TextStyle{Italic: true}
-	memoryHint := widget.NewLabel("💡 512m = 512 МБ, 1g = 1 ГБ, оставьте пустым для без лимита")
+	memoryHint := widget.NewLabel(i18n.T("settings.memory_hint"))
 	memoryHint.TextStyle = fyne.TextStyle{Italic: true}
-	parallelHint := widget.NewLabel("💡 0 = без ограничений, 4 = до 4 параллельных сборок")
+	parallelHint := widget.NewLabel(i18n.T("settings.parallel_hint"))
 	parallelHint.TextStyle = fyne.TextStyle{Italic: true}
-	buildkitTTLLimit := widget.NewLabel("💡 24 = очищать кэш старше 24 часов, 0 = отключить")
+	buildkitTTLLimit := widget.NewLabel(i18n.T("settings.buildkit_ttl_hint"))
 	buildkitTTLLimit.TextStyle = fyne.TextStyle{Italic: true}
-	buildkitSizeLimit := widget.NewLabel("💡 5g = 5 ГБ, 10g = 10 ГБ, оставьте пустым для без лимита")
+	buildkitSizeLimit := widget.NewLabel(i18n.T("settings.buildkit_size_hint"))
 	buildkitSizeLimit.TextStyle = fyne.TextStyle{Italic: true}
 
-	proxyCard := widget.NewCard("Прокси для деплоя", "",
+	proxyCard := widget.NewCard(i18n.T("settings.proxy"), "",
 		container.NewVBox(
 			proxyRadio,
 			proxyHint,
 		),
 	)
 
-	serviceCard := widget.NewCard("Имена сервисов", "Должны совпадать с именами в docker-compose.yml",
+	serviceCard := widget.NewCard(i18n.T("settings.services"), i18n.T("settings.project_name_hint"),
 		container.NewVBox(
-			widget.NewLabelWithStyle("Имя сервиса backend", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.deploy_network"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			makeSettingRow(entryDeployNetwork),
+			widget.NewLabel(i18n.T("settings.network_hint")),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle(i18n.T("settings.backend_service"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryBackendService),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Имя сервиса frontend", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.frontend_service"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryFrontendService),
 			serviceHint,
 		),
 	)
 
-	serviceCard.Content = container.NewVBox(
-		widget.NewLabelWithStyle("Имя внешней сети", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		makeSettingRow(entryDeployNetwork),
-		widget.NewLabel("Сеть должна быть объявлена в compose как external: true и подключена к сервисам."),
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Имя сервиса backend", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		makeSettingRow(entryBackendService),
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Имя сервиса frontend", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		makeSettingRow(entryFrontendService),
-		serviceHint,
-	)
-
-	limitCard := widget.NewCard("Лимиты контейнеров", "Задайте лимиты, которые будут применяться при запуске новых контейнеров",
+	limitCard := widget.NewCard(i18n.T("settings.limits"), "",
 		container.NewVBox(
-			widget.NewLabelWithStyle("Лимит CPU", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.cpu_limit"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryCPU),
 			cpuHint,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Лимит памяти", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.memory_limit"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryMemory),
 			memoryHint,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Параллельная сборка", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.parallel_builds"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryMaxParallel),
 			parallelHint,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Параллельные операции контейнеров", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.container_concurrency"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryContainerConcurrency),
-			widget.NewLabel("💡 Максимум одновременно запускаемых или останавливаемых контейнеров"),
+			widget.NewLabel(i18n.T("settings.container_concurrency_hint")),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Очистка кэша BuildKit", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.buildkit_ttl"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryBuildkitTTL),
 			buildkitTTLLimit,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Максимальный размер кэша", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.buildkit_max_size"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			makeSettingRow(entryBuildkitSize),
 			buildkitSizeLimit,
 		),
 	)
 
-	projectCard := widget.NewCard("Управление проектами", "Добавляйте, удаляйте и переключайтесь между проектами",
+	projectCard := widget.NewCard(i18n.T("settings.projects"), i18n.T("settings.project_list_hint"),
 		container.NewVBox(
-			widget.NewLabelWithStyle("Активный проект", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.active_project"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			container.NewVBox(
 				makeSettingRow(entryPath),
 				container.NewHBox(btnAddProject, btnRemoveProject, btnRenameProject),
 				widget.NewSeparator(),
 			),
-			widget.NewLabelWithStyle("Список проектов", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("settings.project_list"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			container.NewMax(projectsList),
-			widget.NewLabel("💡 Нажмите на проект в списке для переключения. Выбранный проект будет использоваться по умолчанию."),
+			widget.NewLabel(i18n.T("settings.project_list_hint")),
 		),
 	)
 
-	actionsCard := widget.NewCard("Управление", "",
+	actionsCard := widget.NewCard(i18n.T("settings.actions"), "",
 		container.NewVBox(
 			container.NewHBox(btnSave, btnReset),
 			checkEconomyMode,
@@ -753,7 +734,15 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
+	langCard := widget.NewCard(i18n.T("settings.language"), "",
+		container.NewVBox(
+			langRadio,
+			langHint,
+		),
+	)
+
 	content := container.NewVBox(
+		container.NewPadded(langCard),
 		container.NewPadded(basicCard),
 		container.NewPadded(buildCard),
 		container.NewPadded(proxyCard),

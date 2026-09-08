@@ -57,6 +57,10 @@ Start-Process .\containerd-ui.exe
 
 After starting the application, open the Settings tab and select the project root containing `compose.yaml` or `docker-compose.yml`.
 
+### Choosing the Interface Language
+
+The interface language is configured in the Settings tab, in the **Interface Language** card at the top of the page. **Русский** is the default; **English** is also available. The selection is saved automatically and applied after an application restart. See [Interface Language](README.md#interface-language) for details.
+
 ### Adding Multiple Projects
 
 The application supports multiple projects. You can add, rename, and switch between them from the **Project Management** card in the Settings tab:
