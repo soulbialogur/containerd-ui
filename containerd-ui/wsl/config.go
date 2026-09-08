@@ -45,6 +45,7 @@ func (p *ProjectInfo) NameWithFallback() string {
 }
 
 type AppConfig struct {
+	Language                  string        `json:"language"`
 	Projects                  []ProjectInfo `json:"projects"`
 	ActiveProjectPath         string        `json:"active_project_path"`
 	ProjectPath               string        `json:"project_path"`
@@ -97,6 +98,7 @@ type AppConfig struct {
 
 func DefaultConfig() *AppConfig {
 	return &AppConfig{
+		Language:                      "ru",
 		Projects:                      nil,
 		ActiveProjectPath:             "",
 		ProjectPath:                   "",
@@ -180,6 +182,9 @@ func LoadConfig() (*AppConfig, error) {
 	}
 	if config.DeployNetwork == "" {
 		config.DeployNetwork = DefaultConfig().DeployNetwork
+	}
+	if config.Language != "en" {
+		config.Language = "ru"
 	}
 	return config, nil
 }

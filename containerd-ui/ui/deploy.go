@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"context"
 	"strings"
@@ -12,39 +13,38 @@ import (
 
 func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	domainEntry := widget.NewEntry()
-	domainEntry.SetPlaceHolder("example.com")
-	backendCheck := widget.NewCheck("backend", nil)
+	domainEntry.SetPlaceHolder(i18n.T("deploy.domain_placeholder"))
+	backendCheck := widget.NewCheck(i18n.T("deploy.backend"), nil)
 	backendCheck.SetChecked(true)
-	frontendCheck := widget.NewCheck("frontend", nil)
+	frontendCheck := widget.NewCheck(i18n.T("deploy.frontend"), nil)
 	frontendCheck.SetChecked(true)
 	backendPrefix := widget.NewEntry()
 	backendPrefix.SetText("/api")
 	backendPrefix.SetPlaceHolder("/api")
 	tokenEntry := widget.NewEntry()
-	tokenEntry.SetPlaceHolder("eyJhIjoi...")
+	tokenEntry.SetPlaceHolder(i18n.T("deploy.token_placeholder"))
 	tokenEntry.Hidden = true
 
-	httpsCheck := widget.NewCheck("Включить HTTPS (Let's Encrypt)", nil)
+	httpsCheck := widget.NewCheck(i18n.T("deploy.https"), nil)
 	httpsCheck.SetChecked(true)
 
-	proxyRadio := widget.NewRadioGroup([]string{"Traefik + Let's Encrypt", "Cloudflare Tunnel"}, nil)
+	proxyRadio := widget.NewRadioGroup([]string{i18n.T("deploy.traefik"), i18n.T("deploy.cloudflare")}, nil)
 	proxyRadio.Horizontal = true
 
 	proxy := wsl.GetDeploymentProxy()
 	if proxy == "cloudflare" {
-		proxyRadio.SetSelected("Cloudflare Tunnel")
+		proxyRadio.SetSelected(i18n.T("deploy.cloudflare"))
 		tokenEntry.Show()
 		httpsCheck.Hide()
 	} else {
-		proxyRadio.SetSelected("Traefik + Let's Encrypt")
+		proxyRadio.SetSelected(i18n.T("deploy.traefik"))
 	}
 
-	status := widget.NewLabel("Введите домен и проверьте DNS")
-	status.Wrapping = fyne.TextWrapWord
+	status := widget.NewLabel(i18n.T("deploy.status_placeholder"))
 	logs := widget.NewMultiLineEntry()
 	logs.Disable()
 	logs.Wrapping = fyne.TextWrapWord
-	logs.SetPlaceHolder("Логи деплоя появятся здесь")
+	logs.SetPlaceHolder(i18n.T("deploy.logs_placeholder"))
 	logs.SetMinRowsVisible(10)
 
 	appendLog := func(line string) {
@@ -52,27 +52,27 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 		logs.Refresh()
 	}
 
-	proxyHint := widget.NewLabel("💡 Traefik — бесплатный SSL через Let's Encrypt; Cloudflare — через Tunnel, без открытых портов (нужен cloudflared в WSL)")
+	proxyHint := widget.NewLabel(i18n.T("deploy.proxy_hint"))
 	proxyHint.TextStyle = fyne.TextStyle{Italic: true}
 
-	cfPrefixHint := widget.NewLabel("⚠️ Cloudflare Tunnel не удаляет префикс пути. Если backend ожидает /api без префикса, он должен сам обработать этот маршрут; иначе используйте Traefik.")
+	cfPrefixHint := widget.NewLabel(i18n.T("deploy.cf_prefix_hint"))
 	cfPrefixHint.TextStyle = fyne.TextStyle{Italic: true}
 	cfPrefixHint.Wrapping = fyne.TextWrapWord
 	cfPrefixHint.Hide()
 
-	cfTokenHint := widget.NewLabel("🔑 Токен можно получить: Cloudflare Dashboard → Zero Trust → Networks → Tunnels → Save or manage → JSON token")
+	cfTokenHint := widget.NewLabel(i18n.T("deploy.cf_token_hint"))
 	cfTokenHint.TextStyle = fyne.TextStyle{Italic: true}
 	cfTokenHint.Wrapping = fyne.TextWrapWord
 
-	btnSaveToken := widget.NewButton("Сохранить токен", func() {
+	btnSaveToken := widget.NewButton(i18n.T("deploy.save_token"), func() {
 		projectPath := wsl.GetProjectPath()
 		if projectPath == "" {
-			status.SetText("Сначала укажите путь к проекту в настройках")
+			status.SetText(i18n.T("deploy.path_not_set"))
 			return
 		}
 		token := strings.TrimSpace(tokenEntry.Text)
 		if token == "" {
-			status.SetText("Вставьте токен в поле выше")
+			status.SetText(i18n.T("deploy.insert_token"))
 			return
 		}
 
@@ -80,9 +80,9 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 			err := wsl.SaveCloudflareToken(projectPath, token)
 			safeUI(func() {
 				if err != nil {
-					status.SetText("Ошибка сохранения токена: " + err.Error())
+					status.SetText(i18n.T("deploy.token_save_error", err.Error()))
 				} else {
-					status.SetText("✅ Токен сохранён")
+					status.SetText(i18n.T("deploy.token_saved"))
 					tokenEntry.SetText("")
 				}
 			})
@@ -92,7 +92,7 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	proxyOptionsContainer := container.NewVBox(httpsCheck, tokenEntry, cfTokenHint, cfPrefixHint, btnSaveToken)
 
 	proxyRadio.OnChanged = func(value string) {
-		if value == "Traefik + Let's Encrypt" {
+		if value == i18n.T("deploy.traefik") {
 			httpsCheck.Show()
 			tokenEntry.Hide()
 			cfTokenHint.Hide()
@@ -109,16 +109,16 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 		}
 	}
 
-	btnDNS := widget.NewButton("Проверить DNS", func() {
+	btnDNS := widget.NewButton(i18n.T("deploy.check_dns"), func() {
 		domain := strings.TrimSpace(domainEntry.Text)
 		if err := wsl.ValidateDomain(domain); err != nil {
-			status.SetText("DNS не подтверждён: " + err.Error())
+			status.SetText(i18n.T("deploy.dns_error", err.Error()))
 			return
 		}
-		status.SetText("DNS подтверждён: " + domain)
+		status.SetText(i18n.T("deploy.dns_ok", domain))
 	})
 
-	btnPorts := widget.NewButton("Проверить порты 80/443", func() {
+	btnPorts := widget.NewButton(i18n.T("deploy.check_ports"), func() {
 		go func() {
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
@@ -126,32 +126,29 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 			port80, port443, err := wsl.CheckPorts(ctx)
 			safeUI(func() {
 				if err != nil {
-					status.SetText("Ошибка проверки портов: " + err.Error())
+					status.SetText(i18n.T("deploy.proxy_log_error", err.Error()))
 					return
 				}
 
 				var msg string
 				if port80 && port443 {
-					msg = "✅ Порты 80 и 443 свободны"
+					msg = i18n.T("deploy.ports_free")
 				} else {
-					msg = "⚠️ Занятые порты: "
+					var busyPorts []string
 					if !port80 {
-						msg += "80"
+						busyPorts = append(busyPorts, "80")
 					}
 					if !port443 {
-						if msg != "⚠️ Занятые порты: " {
-							msg += ", "
-						}
-						msg += "443"
+						busyPorts = append(busyPorts, "443")
 					}
-					msg += ". Освободите в WSL или Windows (например, IIS) перед деплоем Traefik. Либо выберите Cloudflare Tunnel"
+					msg = i18n.T("deploy.ports_busy", strings.Join(busyPorts, ", "))
 				}
 				status.SetText(msg)
 			})
 		}()
 	})
 
-	btnTools := widget.NewButton("Проверить инструменты", func() {
+	btnTools := widget.NewButton(i18n.T("deploy.check_tools"), func() {
 		go func() {
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
@@ -162,7 +159,7 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 					status.SetText("❌ " + err.Error())
 				} else {
 					proxy := wsl.GetDeploymentProxy()
-					msg := "✅ Все необходимые инструменты найдены"
+					msg := i18n.T("deploy.tools_found")
 					if proxy == "cloudflare" {
 						msg += " (Traefik + Cloudflare)"
 					}
@@ -173,24 +170,24 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	})
 
 	var btnDeploy *widget.Button
-	btnDeploy = widget.NewButton("Деплой", func() {
+	btnDeploy = widget.NewButton(i18n.T("deploy.deploy"), func() {
 		domain := strings.TrimSpace(domainEntry.Text)
 		if domain == "" {
-			status.SetText("Укажите домен")
+			status.SetText(i18n.T("deploy.specify_domain"))
 			return
 		}
 		proxy := wsl.GetDeploymentProxy()
 		if proxy == "cloudflare" && strings.TrimSpace(tokenEntry.Text) == "" {
-			status.SetText("Введите токен Cloudflare Tunnel")
+			status.SetText(i18n.T("deploy.specify_token"))
 			return
 		}
 		btnDeploy.Disable()
-		appendLog("Проверка DNS...")
+		appendLog(i18n.T("deploy.check_dns_deploy"))
 		go func() {
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			if err := wsl.ValidateDomain(domain); err != nil {
-				safeUI(func() { status.SetText("Ошибка DNS: " + err.Error()); btnDeploy.Enable() })
+				safeUI(func() { status.SetText(i18n.T("deploy.dns_error", err.Error())); btnDeploy.Enable() })
 				return
 			}
 
@@ -198,30 +195,30 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 			if proxy == "cloudflare" {
 				projectPath := wsl.GetProjectPath()
 				if projectPath != "" {
-					safeUI(func() { appendLog("Проверка токена Tunnel...") })
+					safeUI(func() { appendLog(i18n.T("deploy.check_token")) })
 					if err := wsl.CheckCloudflareToken(projectPath); err != nil {
-						safeUI(func() { status.SetText("Ошибка: " + err.Error()); btnDeploy.Enable() })
+						safeUI(func() { status.SetText(i18n.T("common.error") + " " + err.Error()); btnDeploy.Enable() })
 						return
 					}
 				}
 			}
 
 			safeUI(func() {
-				appendLog("Генерация конфигурации...")
+				appendLog(i18n.T("deploy.generate_config"))
 			})
 			result, err := wsl.DeployDomain(ctx, domain, strings.TrimSpace(backendPrefix.Text), backendCheck.Checked, frontendCheck.Checked, httpsCheck.Checked)
 			safeUI(func() {
 				if err != nil {
-					status.SetText("Деплой завершён с ошибкой")
-					appendLog("Ошибка: " + err.Error())
+					status.SetText(i18n.T("deploy.deploy_error"))
+					appendLog(i18n.T("common.error") + ": " + err.Error())
 				} else {
 					if proxy == "cloudflare" {
-						status.SetText("Деплой успешно завершён: https://" + domain + " (Cloudflare Tunnel)")
-						appendLog("Tunnel настроен, DNS автоматически привязан к домену")
-						appendLog("Убедитесь, что cloudflared установлен в WSL")
+						status.SetText(i18n.T("deploy.deploy_success_cf", domain))
+						appendLog(i18n.T("deploy.tunnel_configured"))
+						appendLog(i18n.T("deploy.cloudflared_needed"))
 					} else {
-						status.SetText("Деплой успешно завершён: https://" + domain)
-						appendLog("Получение SSL-сертификата выполняется Traefik автоматически")
+						status.SetText(i18n.T("deploy.deploy_success", domain))
+						appendLog(i18n.T("deploy.ssl_auto"))
 					}
 					if result != "" {
 						appendLog(result)
@@ -232,20 +229,20 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 		}()
 	})
 
-	btnRollback := widget.NewButton("Откатить", func() {
+	btnRollback := widget.NewButton(i18n.T("deploy.rollback"), func() {
 		go func() {
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			result, err := wsl.RollbackDomain(ctx)
 			safeUI(func() {
 				if err != nil {
-					status.SetText("Ошибка отката: " + err.Error())
+					status.SetText(i18n.T("deploy.rollback_error", err.Error()))
 				} else {
 					proxy := wsl.GetDeploymentProxy()
 					if proxy == "cloudflare" {
-						status.SetText("Cloudflare Tunnel остановлен")
+						status.SetText(i18n.T("deploy.rollback_success_cf"))
 					} else {
-						status.SetText("Traefik остановлен")
+						status.SetText(i18n.T("deploy.rollback_success"))
 					}
 					appendLog(result)
 				}
@@ -253,14 +250,14 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 		}()
 	})
 
-	btnLogs := widget.NewButton("Логи прокси", func() {
+	btnLogs := widget.NewButton(i18n.T("deploy.proxy_logs"), func() {
 		go func() {
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			result, err := wsl.DomainProxyLogs(ctx)
 			safeUI(func() {
 				if err != nil {
-					logs.SetText("Ошибка: " + err.Error())
+					logs.SetText(i18n.T("deploy.proxy_log_error", err.Error()))
 				} else {
 					logs.SetText(result)
 				}
@@ -270,34 +267,34 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	})
 	_ = win
 
-	cardConfig := widget.NewCard("Конфигурация", "", container.NewVBox(
+	cardConfig := widget.NewCard(i18n.T("deploy.config_card"), "", container.NewVBox(
 		container.NewBorder(nil, nil, nil, btnDNS, domainEntry),
 		container.NewHBox(btnPorts, btnTools),
 		container.NewBorder(
 			nil, nil,
 			container.NewHBox(
-				widget.NewLabel("Сервисы:"),
+				widget.NewLabel(i18n.T("deploy.services")),
 				backendCheck,
 				frontendCheck,
-				widget.NewLabel("Префикс backend:"),
+				widget.NewLabel(i18n.T("deploy.backend_prefix")),
 			),
 			nil,
 			backendPrefix,
 		),
 	))
 
-	cardProxy := widget.NewCard("Прокси и SSL", "", container.NewVBox(
+	cardProxy := widget.NewCard(i18n.T("deploy.proxy"), "", container.NewVBox(
 		proxyRadio,
 		proxyHint,
 		proxyOptionsContainer,
 	))
 
-	cardActions := widget.NewCard("Действия", "", container.NewVBox(
+	cardActions := widget.NewCard(i18n.T("deploy.actions_card"), "", container.NewVBox(
 		container.NewAdaptiveGrid(3, btnDeploy, btnRollback, btnLogs),
 		status,
 	))
 
-	cardLogs := widget.NewCard("Логи деплоя", "", logs)
+	cardLogs := widget.NewCard(i18n.T("deploy.logs_card"), "", logs)
 
 	content := container.NewVBox(
 		container.NewPadded(cardConfig),

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"context"
 	"os/exec"
@@ -192,10 +193,10 @@ func getAllComponentsStatus() []ComponentStatus {
 	var result []ComponentStatus
 	if err != nil {
 		result = []ComponentStatus{
-			{Name: "WSL", Version: versions["WSL"], Icon: "❌", Active: false, Detail: "Таймаут/ошибка проверки"},
-			{Name: "Containerd", Version: versions["Containerd"], Icon: "⚠️", Active: false, Detail: "Недоступен"},
-			{Name: "Buildkitd", Version: versions["Buildkitd"], Icon: "⚠️", Active: false, Detail: "Недоступен"},
-			{Name: "Nerdctl", Version: versions["Nerdctl"], Icon: "❌", Active: false, Detail: "Недоступен"},
+			{Name: "WSL", Version: versions["WSL"], Icon: "❌", Active: false, Detail: i18n.T("status.detail_timeout")},
+			{Name: "Containerd", Version: versions["Containerd"], Icon: "⚠️", Active: false, Detail: i18n.T("status.detail_unavailable")},
+			{Name: "Buildkitd", Version: versions["Buildkitd"], Icon: "⚠️", Active: false, Detail: i18n.T("status.detail_unavailable")},
+			{Name: "Nerdctl", Version: versions["Nerdctl"], Icon: "❌", Active: false, Detail: i18n.T("status.detail_unavailable")},
 		}
 	} else {
 		lines := strings.Split(out, "\n")
@@ -207,27 +208,27 @@ func getAllComponentsStatus() []ComponentStatus {
 			}
 
 			if strings.Contains(line, "WSL:OK") {
-				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "✅", Active: true, Detail: "активен"})
+				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "✅", Active: true, Detail: i18n.T("status.detail_active")})
 			} else if strings.Contains(line, "WSL:NO") {
-				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "⚠️", Active: false, Detail: "остановлен"})
+				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "⚠️", Active: false, Detail: i18n.T("status.detail_stopped")})
 			}
 
 			if strings.Contains(line, "CONTAINERD:OK") {
-				result = append(result, ComponentStatus{Name: "Containerd", Version: versions["Containerd"], Icon: "✅", Active: true, Detail: "gRPC активен"})
+				result = append(result, ComponentStatus{Name: "Containerd", Version: versions["Containerd"], Icon: "✅", Active: true, Detail: i18n.T("status.detail_grpc")})
 			} else if strings.Contains(line, "CONTAINERD:NO") {
-				result = append(result, ComponentStatus{Name: "Containerd", Version: versions["Containerd"], Icon: "⚠️", Active: false, Detail: "Не запущен"})
+				result = append(result, ComponentStatus{Name: "Containerd", Version: versions["Containerd"], Icon: "⚠️", Active: false, Detail: i18n.T("status.detail_not_started")})
 			}
 
 			if strings.Contains(line, "BUILDKIT:OK") {
-				result = append(result, ComponentStatus{Name: "Buildkitd", Version: versions["Buildkitd"], Icon: "✅", Active: true, Detail: "Доступен"})
+				result = append(result, ComponentStatus{Name: "Buildkitd", Version: versions["Buildkitd"], Icon: "✅", Active: true, Detail: i18n.T("status.detail_available")})
 			} else if strings.Contains(line, "BUILDKIT:NO") {
-				result = append(result, ComponentStatus{Name: "Buildkitd", Version: versions["Buildkitd"], Icon: "⚠️", Active: false, Detail: "Остановлен"})
+				result = append(result, ComponentStatus{Name: "Buildkitd", Version: versions["Buildkitd"], Icon: "⚠️", Active: false, Detail: i18n.T("status.detail_stopped_cap")})
 			}
 
 			if strings.Contains(line, "NERDCTL:OK") {
-				result = append(result, ComponentStatus{Name: "Nerdctl", Version: versions["Nerdctl"], Icon: "✅", Active: true, Detail: "Доступен"})
+				result = append(result, ComponentStatus{Name: "Nerdctl", Version: versions["Nerdctl"], Icon: "✅", Active: true, Detail: i18n.T("status.detail_available")})
 			} else if strings.Contains(line, "NERDCTL:NO") {
-				result = append(result, ComponentStatus{Name: "Nerdctl", Version: versions["Nerdctl"], Icon: "❌", Active: false, Detail: "Не найден"})
+				result = append(result, ComponentStatus{Name: "Nerdctl", Version: versions["Nerdctl"], Icon: "❌", Active: false, Detail: i18n.T("status.detail_not_found")})
 			}
 		}
 	}
@@ -327,10 +328,10 @@ func BuildStatusTab() fyne.CanvasObject {
 	nerdctlCard := newResponsiveStatusCard("Nerdctl")
 
 	metrics := map[string]*metricCard{
-		"containers_running": newMetricCard("Контейнеры", "📦"),
-		"images":             newMetricCard("Образы", "🖼️"),
-		"volumes":            newMetricCard("Тома", "💾"),
-		"networks":           newMetricCard("Сети", "🌐"),
+		"containers_running": newMetricCard(i18n.T("status.metric_containers"), "📦"),
+		"images":             newMetricCard(i18n.T("status.metric_images"), "🖼️"),
+		"volumes":            newMetricCard(i18n.T("status.metric_volumes"), "💾"),
+		"networks":           newMetricCard(i18n.T("status.metric_networks"), "🌐"),
 	}
 
 	updateMetrics := func() {
@@ -342,7 +343,7 @@ func BuildStatusTab() fyne.CanvasObject {
 		}
 	}
 
-	lastCheckLabel := widget.NewLabel("Последняя проверка: —")
+	lastCheckLabel := widget.NewLabel(i18n.T("status.last_check_never"))
 
 	updateUI := func() {
 		statusCache.Lock()
@@ -370,22 +371,22 @@ func BuildStatusTab() fyne.CanvasObject {
 				nerdctlCard.SetStatus(statusText, compactStatus)
 			}
 		}
-		lastCheckLabel.SetText("Последняя проверка: " + time.Now().Format("15:04:05"))
+		lastCheckLabel.SetText(i18n.T("status.last_check", time.Now().Format("15:04:05")))
 		updateMetrics()
 	}
 
-	btnRefresh := widget.NewButton("🔄 Обновить", func() { go updateUI() })
+	btnRefresh := widget.NewButton(i18n.T("status.refresh"), func() { go updateUI() })
 
 	tab := newTabActive(true, TickerAutoRefresh, func() {
 		updateUI()
 	})
 
-	autoRefresh := widget.NewCheck("Автообновление (30с)", func(checked bool) {
+	autoRefresh := widget.NewCheck(i18n.T("status.auto_refresh"), func(checked bool) {
 		tab.SetActive(checked)
 	})
 	autoRefresh.Checked = true
 
-	btnStartBuildkitd := widget.NewButton("▶ Запустить Buildkitd", func() {
+	btnStartBuildkitd := widget.NewButton(i18n.T("status.start_buildkitd"), func() {
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
@@ -394,14 +395,14 @@ func BuildStatusTab() fyne.CanvasObject {
 			}
 
 			if err := wsl.StartBuildkitd(); err != nil {
-				lastCheckLabel.SetText("Ошибка: " + err.Error())
+				lastCheckLabel.SetText(i18n.T("common.error") + ": " + err.Error())
 			} else {
 				updateUI()
 			}
 		}()
 	})
 
-	btnStopBuildkitd := widget.NewButton("⏹ Остановить Buildkitd", func() {
+	btnStopBuildkitd := widget.NewButton(i18n.T("status.stop_buildkitd"), func() {
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
@@ -416,14 +417,14 @@ func BuildStatusTab() fyne.CanvasObject {
 
 	updateUI()
 
-	registerTabNamed("Статус", tab)
+	registerTabNamed(i18n.T("tabs.status"), tab)
 
 	return withVerticalScroll(container.NewVBox(
 		container.NewHBox(btnRefresh, autoRefresh, layout.NewSpacer(), lastCheckLabel),
 		widget.NewSeparator(),
 		container.NewAdaptiveGrid(4, wslCard.CanvasObject(), containerdCard.CanvasObject(), buildkitdCard.CanvasObject(), nerdctlCard.CanvasObject()),
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Обзор системы:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("status.overview"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewAdaptiveGrid(4,
 			metrics["containers_running"].widget(),
 			metrics["images"].widget(),
@@ -432,7 +433,7 @@ func BuildStatusTab() fyne.CanvasObject {
 		),
 		widget.NewSeparator(),
 		container.NewHBox(
-			widget.NewLabelWithStyle("Управление Buildkitd:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(i18n.T("status.buildkitd_control"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			btnStartBuildkitd, btnStopBuildkitd,
 		),
 	))

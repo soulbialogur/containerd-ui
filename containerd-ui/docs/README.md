@@ -11,6 +11,7 @@ This is a concise guide to the application, organized by task so you can quickly
 - [Domain Deployment](deployment.md) — Traefik, Let's Encrypt, and Cloudflare.
 - [Troubleshooting](troubleshooting.md) — common errors and how to diagnose them.
 - [Core Concepts](concepts.md) — architecture, caching, resource saving, BuildKit, and lifecycle behavior.
+- [Interface Language](#interface-language) — switching between Russian and English.
 - [Environment Diagnostics](diagnostics.md) — all WSL, DNS, port, network, and tool checks.
 - [Project Requirements](project-requirements.md) — `compose.yaml`, the configurable network, services, and domain.
 - [Images and Application Updates](images-and-updates.md) — building, tagging, updating, hardware, and licensing.
@@ -36,6 +37,7 @@ To understand how the application works, start with [concepts.md](concepts.md). 
 - run pre-deployment checks for DNS, ports `80`/`443`, required tools, and environment availability;
 - roll back deployments and view proxy logs;
 - configure WSL and containerd;
+- switch the interface language between Russian and English from the Settings tab;
 - run Traefik or Cloudflare Tunnel for domain deployment;
 - use two infrastructure access layers: the containerd gRPC API and the WSL + nerdctl fallback;
 - run container operations in parallel with a configurable concurrency limit;
@@ -93,6 +95,7 @@ How to interpret the data:
 Here is a brief map of the internal architecture:
 
 - `ui/` — the presentation layer: tables, tabs, dialogs, progress bars, and events;
+- `i18n/` — the localization package: translation dictionaries and the `T()` lookup function;
 - `wsl/` — the client layer for WSL, `nerdctl`, `containerd`, `buildkitd`, checks, caches, and multi-project management;
 - `main.go` — UI initialization and tab registration;
 - `CacheManager` — centralized cache invalidation and metrics;
@@ -127,6 +130,32 @@ The Cleanup tab provides six operations:
 6. **Full cleanup** — runs all of the operations above in sequence.
 
 All operations run asynchronously, and their results appear in the UI output area while they run and after they finish.
+
+## Interface Language
+
+The application ships with a built-in localization system. Two languages are available out of the box:
+
+- **Русский** (default);
+- **English**.
+
+### Switching the Language
+
+1. Open the **Settings** tab.
+2. The **Interface Language** card is at the top of the page.
+3. Select **Русский** or **English**.
+4. The choice is saved automatically to the `language` field in `config.json`.
+5. Restart the application to apply the new language everywhere.
+
+If `config.json` is missing or the `language` field is empty, the application falls back to Russian.
+
+### For Developers
+
+Translations live in the `i18n/` package:
+
+- `i18n/i18n.go` — the translation engine: `T(key, args...)` lookup with printf-style formatting, thread-safe locale switching;
+- `i18n/ru.json`, `i18n/en.json` — translation dictionaries with nested `section.key` structure.
+
+All user-facing strings must go through `i18n.T("section.key", args...)`. If a key is missing, the function returns the key itself, which makes untranslated strings easy to spot. To add a new language, create a new JSON file, register it in `i18n.go`, and add a constant to the `Locale` type.
 
 ## Multi-Project Support
 

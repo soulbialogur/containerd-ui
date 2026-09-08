@@ -2,6 +2,7 @@ package wsl
 
 import (
 	"bytes"
+	"containerd-ui/i18n"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -803,23 +804,23 @@ func TranslateStatus(status string) string {
 	var result string
 	switch {
 	case strings.Contains(status, "healthy"):
-		result = "[OK] Запущен (здоров)"
+		result = i18n.T("container_status.healthy")
 	case strings.Contains(status, "unhealthy"):
-		result = "[!] Запущен (болен)"
+		result = i18n.T("container_status.unhealthy")
 	case strings.Contains(status, "running") || strings.Contains(status, "up"):
-		result = "[OK] Запущен"
+		result = i18n.T("container_status.running")
 	case strings.Contains(status, "created"):
-		result = "Создан"
+		result = i18n.T("container_status.created")
 	case strings.Contains(status, "restarting"):
-		result = "Перезапуск..."
+		result = i18n.T("container_status.restarting")
 	case strings.Contains(status, "removing"):
-		result = "Удаление..."
+		result = i18n.T("container_status.removing")
 	case strings.Contains(status, "paused"):
-		result = "Приостановлен"
+		result = i18n.T("container_status.paused")
 	case strings.Contains(status, "exited"):
-		result = "Остановлен"
+		result = i18n.T("container_status.exited")
 	case strings.Contains(status, "dead"):
-		result = "Мёртв"
+		result = i18n.T("container_status.dead")
 	default:
 		result = status
 	}
