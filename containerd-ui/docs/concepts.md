@@ -11,7 +11,7 @@ The application uses two access layers:
 
 This makes the application resilient in a Windows + WSL2 environment: some operations run directly in Linux, while others use the containerd API.
 
-All WSL commands run inside the selected distribution, usually `Ubuntu-24.04`. The UI uses caching to stay responsive and rereads data only when necessary.
+All WSL commands run inside the selected distribution, usually `Debian`. The UI uses caching to stay responsive and rereads data only when necessary.
 
 ## 2. Caching and Invalidation
 

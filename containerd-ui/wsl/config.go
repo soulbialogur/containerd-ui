@@ -1,18 +1,30 @@
 package wsl
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 )
 
-// ConfigPath возвращает путь к файлу конфигурации в %APPDATA%.
+// ConfigPath возвращает путь к config.json рядом с exe.
+// Старый путь в %APPDATA% сохраняется для уже установленных экземпляров.
 func ConfigPath() string {
+	if executable, err := os.Executable(); err == nil {
+		executableConfig := filepath.Join(filepath.Dir(executable), "config.json")
+		if _, err := os.Stat(executableConfig); err == nil {
+			return executableConfig
+		}
+	}
+
 	appData, err := os.UserConfigDir()
 	if err == nil {
 		appDir := filepath.Join(appData, "ContainerdUI")
@@ -45,55 +57,59 @@ func (p *ProjectInfo) NameWithFallback() string {
 }
 
 type AppConfig struct {
-	Language                  string        `json:"language"`
-	Projects                  []ProjectInfo `json:"projects"`
-	ActiveProjectPath         string        `json:"active_project_path"`
-	ProjectPath               string        `json:"project_path"`
-	WslDistro                 string        `json:"wsl_distro"`
-	CdPort                    int           `json:"cd_port"`
-	CdNamespace               string        `json:"cd_namespace"`
-	ScriptsPath               string        `json:"scripts_path"`
-	DBVolumeName              string        `json:"db_volume_name"`
-	SystemdService            string        `json:"systemd_service"`
-	NerdctlPath               string        `json:"nerdctl_path"`
-	LogTail                   int           `json:"log_tail"`
-	WslCacheTTL               int           `json:"wsl_cache_ttl"`
-	ContainersCacheTTL        int           `json:"containers_cache_ttl"`
-	ImagesCacheTTL            int           `json:"images_cache_ttl"`
-	VolumesCacheTTL           int           `json:"volumes_cache_ttl"`
-	AutoRefreshInterval       int           `json:"auto_refresh_interval"`
-	EconomyMode               bool          `json:"economy_mode"`
-	IdleDaemonStopMinutes     int           `json:"idle_daemon_stop_minutes"`
-	SquashLayers              bool          `json:"squash_layers"`
-	Compression               string        `json:"compression"`
-	CompressionLevel          int           `json:"compression_level"`
-	MaxWSLCacheSize           int64         `json:"max_wsl_cache_size"`
-	WSLCacheCleanupAt         int           `json:"wsl_cache_cleanup_at"`
-	CacheContainer            int           `json:"cache_container"`
-	CacheImage                int           `json:"cache_image"`
-	CacheVolume               int           `json:"cache_volume"`
-	CacheStats                int           `json:"cache_stats"`
-	CacheContainerStatus      int           `json:"cache_container_status"`
-	CacheSplitImage           int           `json:"cache_split_image"`
-	CacheHumanSize            int           `json:"cache_human_size"`
-	MaxCacheEntries           int           `json:"max_cache_entries"`
-	RetryInitialDelay         int           `json:"retry_initial_delay"`
-	RetryMaxDelay             int           `json:"retry_max_delay"`
-	RetryMultiplier           int           `json:"retry_multiplier"`
-	RetryMaxAttempts          int           `json:"retry_max_attempts"`
-	DefaultCPU                string        `json:"default_cpu_limit"`
-	DefaultMemory             string        `json:"default_memory_limit"`
-	MaxParallelism            int           `json:"max_parallelism"`
-	ContainerOperationConcurrency int      `json:"container_operation_concurrency"`
-	BuildkitCacheTTL          int           `json:"buildkit_cache_ttl"`
-	BuildkitMaxSize           string        `json:"buildkit_max_size"`
-	DeploymentProxy           string        `json:"deployment_proxy"`
-	DeployNetwork             string        `json:"deploy_network"`
-	DeployEmail               string        `json:"deploy_email"`
-	DeployServiceBackend      string        `json:"deploy_service_backend"`
-	DeployServiceFrontend     string        `json:"deploy_service_frontend"`
-	DeployServiceBackendPort  int           `json:"deploy_service_backend_port"`
-	DeployServiceFrontendPort int           `json:"deploy_service_frontend_port"`
+	Language                      string        `json:"language"`
+	Projects                      []ProjectInfo `json:"projects"`
+	ActiveProjectPath             string        `json:"active_project_path"`
+	ProjectPath                   string        `json:"project_path"`
+	WslDistro                     string        `json:"wsl_distro"`
+	Shell                         string        `json:"shell"`
+	InitSystem                    string        `json:"init_system"`
+	PkgManager                    string        `json:"pkg_manager"`
+	PrivilegeCmd                  string        `json:"privilege_cmd"`
+	CdPort                        int           `json:"cd_port"`
+	CdNamespace                   string        `json:"cd_namespace"`
+	ScriptsPath                   string        `json:"scripts_path"`
+	DBVolumeName                  string        `json:"db_volume_name"`
+	SystemdService                string        `json:"systemd_service"`
+	NerdctlPath                   string        `json:"nerdctl_path"`
+	LogTail                       int           `json:"log_tail"`
+	WslCacheTTL                   int           `json:"wsl_cache_ttl"`
+	ContainersCacheTTL            int           `json:"containers_cache_ttl"`
+	ImagesCacheTTL                int           `json:"images_cache_ttl"`
+	VolumesCacheTTL               int           `json:"volumes_cache_ttl"`
+	AutoRefreshInterval           int           `json:"auto_refresh_interval"`
+	EconomyMode                   bool          `json:"economy_mode"`
+	IdleDaemonStopMinutes         int           `json:"idle_daemon_stop_minutes"`
+	SquashLayers                  bool          `json:"squash_layers"`
+	Compression                   string        `json:"compression"`
+	CompressionLevel              int           `json:"compression_level"`
+	MaxWSLCacheSize               int64         `json:"max_wsl_cache_size"`
+	WSLCacheCleanupAt             int           `json:"wsl_cache_cleanup_at"`
+	CacheContainer                int           `json:"cache_container"`
+	CacheImage                    int           `json:"cache_image"`
+	CacheVolume                   int           `json:"cache_volume"`
+	CacheStats                    int           `json:"cache_stats"`
+	CacheContainerStatus          int           `json:"cache_container_status"`
+	CacheSplitImage               int           `json:"cache_split_image"`
+	CacheHumanSize                int           `json:"cache_human_size"`
+	MaxCacheEntries               int           `json:"max_cache_entries"`
+	RetryInitialDelay             int           `json:"retry_initial_delay"`
+	RetryMaxDelay                 int           `json:"retry_max_delay"`
+	RetryMultiplier               int           `json:"retry_multiplier"`
+	RetryMaxAttempts              int           `json:"retry_max_attempts"`
+	DefaultCPU                    string        `json:"default_cpu_limit"`
+	DefaultMemory                 string        `json:"default_memory_limit"`
+	MaxParallelism                int           `json:"max_parallelism"`
+	ContainerOperationConcurrency int           `json:"container_operation_concurrency"`
+	BuildkitCacheTTL              int           `json:"buildkit_cache_ttl"`
+	BuildkitMaxSize               string        `json:"buildkit_max_size"`
+	DeploymentProxy               string        `json:"deployment_proxy"`
+	DeployNetwork                 string        `json:"deploy_network"`
+	DeployEmail                   string        `json:"deploy_email"`
+	DeployServiceBackend          string        `json:"deploy_service_backend"`
+	DeployServiceFrontend         string        `json:"deploy_service_frontend"`
+	DeployServiceBackendPort      int           `json:"deploy_service_backend_port"`
+	DeployServiceFrontendPort     int           `json:"deploy_service_frontend_port"`
 }
 
 func DefaultConfig() *AppConfig {
@@ -102,7 +118,11 @@ func DefaultConfig() *AppConfig {
 		Projects:                      nil,
 		ActiveProjectPath:             "",
 		ProjectPath:                   "",
-		WslDistro:                     "Ubuntu-24.04",
+		WslDistro:                     "",
+		Shell:                         "",
+		InitSystem:                    "",
+		PkgManager:                    "",
+		PrivilegeCmd:                  "",
 		CdPort:                        50051,
 		CdNamespace:                   "default",
 		ScriptsPath:                   "scripts/containerd",
@@ -138,6 +158,102 @@ func DefaultConfig() *AppConfig {
 	}
 }
 
+// WslExecutable возвращает путь к wsl.exe независимо от PATH GUI-процесса.
+func WslExecutable() string {
+	if path, err := exec.LookPath("wsl.exe"); err == nil {
+		return path
+	}
+
+	if windir := os.Getenv("WINDIR"); windir != "" {
+		path := filepath.Join(windir, "System32", "wsl.exe")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	return "wsl.exe"
+}
+
+// wslExecutable сохраняется как совместимый внутренний алиас для старого кода пакетa.
+func wslExecutable() string {
+	return WslExecutable()
+}
+
+// DetectWslDistros возвращает список установленных WSL-дистрибутивов.
+// wsl.exe -l -q может отдавать UTF-16LE, поэтому перед разбором
+// очищаем нулевые байты и BOM.
+func DetectWslDistros() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-l", "-q")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	out, err := cmd.Output()
+	if err != nil || ctx.Err() != nil {
+		return nil
+	}
+
+	cleaned := strings.ReplaceAll(string(out), "\x00", "")
+	cleaned = strings.TrimPrefix(cleaned, "\uFEFF")
+	cleaned = strings.TrimPrefix(cleaned, "\xFF\xFE")
+	cleaned = strings.ReplaceAll(cleaned, "\r\n", "\n")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "\n")
+
+	distros := make([]string, 0, 4)
+	seen := make(map[string]struct{})
+
+	for _, line := range strings.Split(cleaned, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "\uFEFF"))
+		if line == "" {
+			continue
+		}
+
+		key := strings.ToLower(line)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+
+		seen[key] = struct{}{}
+		distros = append(distros, line)
+	}
+
+	return distros
+}
+
+// IsWslDistroAvailable проверяет, существует ли distro в текущем списке WSL.
+func IsWslDistroAvailable(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, distro := range DetectWslDistros() {
+		if strings.EqualFold(strings.TrimSpace(distro), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// DetectWslDistro возвращает первый доступный WSL-дистрибутив.
+// Результат не кэшируется через sync.Once: WSL может быть запущен позже,
+// а список установленных дистрибутивов может измениться во время работы приложения.
+func DetectWslDistro() string {
+	distros := DetectWslDistros()
+	if len(distros) == 0 {
+		return ""
+	}
+
+	// Для этого приложения Debian является предпочтительным дистрибутивом.
+	// Не выбираем случайно docker-desktop/Ubuntu, если Debian установлен.
+	for _, distro := range distros {
+		if strings.EqualFold(strings.TrimSpace(distro), "Debian") {
+			return distro
+		}
+	}
+
+	return distros[0]
+}
+
 func LoadConfig() (*AppConfig, error) {
 	config := DefaultConfig()
 	path := ConfigPath()
@@ -150,8 +266,14 @@ func LoadConfig() (*AppConfig, error) {
 	}
 	EnsureActiveProject(config)
 
-	if config.WslDistro == "" {
-		config.WslDistro = DefaultConfig().WslDistro
+	// Никогда не доверяем старому имени distro без проверки.
+	// Пользователь мог удалить/переименовать дистрибутив между запусками.
+	if !IsWslDistroAvailable(config.WslDistro) {
+		if detected := DetectWslDistro(); detected != "" {
+			config.WslDistro = detected
+		} else {
+			config.WslDistro = ""
+		}
 	}
 	if config.CdPort == 0 {
 		config.CdPort = DefaultConfig().CdPort
@@ -500,25 +622,30 @@ func GetProjectPathWSL() string {
 
 func GetWslDistro() string {
 	configCache.RLock()
-	if configCache.config != nil && configCache.config.WslDistro != "" {
-		distro := configCache.config.WslDistro
+	if configCache.config != nil {
+		distro := strings.TrimSpace(configCache.config.WslDistro)
 		configCache.RUnlock()
-		return distro
+		if distro != "" {
+			return distro
+		}
+	} else {
+		configCache.RUnlock()
 	}
-	configCache.RUnlock()
+
+	// Не запускаем WSL с пустым или вымышленным -d.
+	// Если WSL появился после старта приложения, следующая попытка повторно
+	// обнаружит distro.
 	config, err := LoadConfig()
-	if err == nil && config.WslDistro != "" {
+	if err == nil && config != nil {
 		configCache.Lock()
 		configCache.config = config
 		configCache.Unlock()
-		return config.WslDistro
+		if distro := strings.TrimSpace(config.WslDistro); distro != "" {
+			return distro
+		}
 	}
-	configCache.Lock()
-	if configCache.config == nil {
-		configCache.config = DefaultConfig()
-	}
-	configCache.Unlock()
-	return DefaultConfig().WslDistro
+
+	return ""
 }
 
 func GetCdPort() int {

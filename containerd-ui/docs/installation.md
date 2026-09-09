@@ -4,15 +4,22 @@
 
 - Windows 10/11
 - WSL2
-- Ubuntu 24.04
+- Debian inside WSL2
 - access to PowerShell
 - permission to install packages in WSL
-- Go 1.26+ — required to build the application from source
+- Go 1.26.5 or newer — required to build the application from source
+- MinGW-w64 — required for the Windows CGO cross-build
+
+## Runtime Stack
+
+This guide targets Debian in WSL2. The application expects Debian's `systemd` and `apt` tools when it checks services and installs packages. You can override detected values in `config.json`, but Alpine/OpenRC is not the documented deployment path.
 
 ## Install WSL
 
+### Debian (Recommended)
+
 ```powershell
-wsl --install Ubuntu-24.04
+wsl --install Debian
 ```
 
 Verify it:
@@ -29,6 +36,8 @@ If anything is missing, install or start the services manually, then check their
 
 ## Install containerd and nerdctl
 
+### Debian
+
 ```bash
 sudo apt update
 sudo apt install -y containerd nerdctl
@@ -43,17 +52,22 @@ nerdctl info
 
 ## Install and Start BuildKit
 
-BuildKit is required to build images in the application. Install the package and make sure the service is available in WSL:
+BuildKit is required to build images in the application.
+
+### Debian
 
 ```bash
 sudo apt install -y buildkit
-sudo systemctl enable buildkit
-sudo systemctl start buildkit
+sudo systemctl enable --now buildkit || true
+buildctl --version
+buildkitd --version
 ```
 
-The complete set of verification commands and startup/error scenarios is available in [diagnostics.md](diagnostics.md). If the daemon will not start or keeps failing, also see [troubleshooting.md](troubleshooting.md). The application can start `buildkitd` automatically when a build begins if it is not already running.
+The Debian package may not provide an enabled `buildkit` systemd unit on every installation. The application can start `buildkitd` automatically when a build begins if the daemon is installed but not already running. The complete set of verification commands and startup/error scenarios is available in [diagnostics.md](diagnostics.md). If the daemon will not start or keeps failing, also see [troubleshooting.md](troubleshooting.md).
 
 ## Start containerd
+
+### Debian
 
 ```bash
 sudo systemctl enable containerd
@@ -87,14 +101,36 @@ For quick environment checks and commands, see [diagnostics.md](diagnostics.md).
 
 ## Recommended Environment Layout
 
+### Debian
+
 ```text
 Windows
-└── WSL Ubuntu 24.04
+└── WSL Debian
     ├── containerd
     ├── nerdctl
     ├── buildkitd
     ├── cloudflared
     └── app project
+```
+
+## Build the Windows Application from Source
+
+Run the build from PowerShell through the Debian WSL environment:
+
+```powershell
+cd "C:\Users\User\OneDrive\Desktop\ai-chatbot-website"
+bash containerd-ui/build.sh
+```
+
+The script runs `go mod tidy`, installs MinGW packages when needed, and cross-compiles a Windows `amd64` executable with `CGO_ENABLED=1`. The output is `containerd-ui/containerd-ui.exe`.
+
+To install the build dependencies manually inside Debian:
+
+```bash
+sudo apt update
+sudo apt install -y golang gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+go version
+x86_64-w64-mingw32-gcc --version
 ```
 
 ## How the Application Accesses Containers

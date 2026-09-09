@@ -341,7 +341,14 @@ func StartBuildkitd() error {
 	if CheckBuildkitd() {
 		return nil
 	}
-	_, err := RunWSL("sudo mkdir -p /run/buildkit && sudo chmod 777 /run/buildkit && sudo nohup /usr/local/bin/buildkitd --addr unix:///run/buildkit/buildkitd.sock > /tmp/buildkitd.log 2>&1 & chmod 666 /run/buildkit/buildkitd.sock")
+	priv := PrivilegePrefix()
+	cmd := fmt.Sprintf(
+		"%smkdir -p /run/buildkit && %schmod 777 /run/buildkit && "+
+			"%ssn -c 'nohup $(command -v buildkitd || echo /usr/local/bin/buildkitd) --addr unix:///run/buildkit/buildkitd.sock > /tmp/buildkitd.log 2>&1 &' && "+
+			"%schmod 666 /run/buildkit/buildkitd.sock",
+		priv, priv, priv, priv,
+	)
+	_, err := RunWSL(cmd)
 	if err != nil {
 		return fmt.Errorf("не удалось запустить buildkitd: %w", err)
 	}
@@ -356,7 +363,7 @@ func StartBuildkitd() error {
 }
 
 func StopBuildkitd() {
-	_, err := RunWSL("sudo pkill -f buildkitd 2>/dev/null; echo 'ok'")
+	_, err := RunWSL(PrivilegePrefix() + "pkill -f buildkitd 2>/dev/null; echo 'ok'")
 	if err == nil {
 		buildkitdState.Lock()
 		buildkitdState.running = false
@@ -382,16 +389,48 @@ type wslCacheEntry struct {
 	size      int64
 }
 
+// runWSLDirect выполняет команду в WSL через указанную оболочку, без кэша.
+// Используется для служебных вызовов (например, детект окружения), когда
+// сама оболочка ещё неизвестна. Ограничена контекстом 10 секунд, чтобы
+// зависший вызов wsl.exe не блокировал UI.
+func runWSLDirect(shell, command string) (string, error) {
+	distro := strings.TrimSpace(GetWslDistro())
+	if distro == "" {
+		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, shell, "-c", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return strings.TrimSpace(out.String()), fmt.Errorf("таймаут выполнения WSL-команды (10s)")
+	}
+	return strings.TrimSpace(out.String()), err
+}
+
 func RunWSL(command string) (string, error) {
+	distro := strings.TrimSpace(GetWslDistro())
+	if distro == "" {
+		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
+	}
+
 	wslCache.RLock()
 	ttl := time.Duration(wslCacheTTL.Load()) * time.Second
-	if entry, ok := wslCache.m[command]; ok && time.Since(entry.timestamp) < ttl {
+	cacheKey := distro + "\x00" + command
+	if entry, ok := wslCache.m[cacheKey]; ok && time.Since(entry.timestamp) < ttl {
 		wslCache.RUnlock()
 		return entry.output, entry.err
 	}
 	wslCache.RUnlock()
 
-	cmd := exec.Command("wsl", "-d", GetWslDistro(), "bash", "-c", command)
+	// Таймаут защищает UI от вечной блокировки при зависшей WSL-VM.
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, GetShell(), "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -399,6 +438,9 @@ func RunWSL(command string) (string, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		err = fmt.Errorf("таймаут выполнения WSL-команды (120s)")
+	}
 	result := strings.TrimSpace(out.String())
 	resultSize := int64(len(result))
 
@@ -424,7 +466,7 @@ func RunWSL(command string) (string, error) {
 			delete(wslCache.m, oldestKey)
 		}
 	}
-	wslCache.m[command] = wslCacheEntry{
+	wslCache.m[cacheKey] = wslCacheEntry{
 		output:    result,
 		err:       err,
 		timestamp: time.Now(),
@@ -440,9 +482,15 @@ func RunWSLWithCancel(ctx context.Context, command string) (string, error) {
 	if isBuildCommand(command) {
 		return executeWSLCommand(ctx, command, true)
 	}
+	distro := strings.TrimSpace(GetWslDistro())
+	if distro == "" {
+		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
+	}
+
 	wslCache.RLock()
 	ttl := time.Duration(wslCacheTTL.Load()) * time.Second
-	if entry, ok := wslCache.m[command]; ok && time.Since(entry.timestamp) < ttl {
+	cacheKey := distro + "\x00" + command
+	if entry, ok := wslCache.m[cacheKey]; ok && time.Since(entry.timestamp) < ttl {
 		wslCache.RUnlock()
 		return entry.output, entry.err
 	}
@@ -451,7 +499,12 @@ func RunWSLWithCancel(ctx context.Context, command string) (string, error) {
 }
 
 func executeWSLCommand(ctx context.Context, command string, skipCache bool) (string, error) {
-	cmd := exec.CommandContext(ctx, "wsl", "-d", GetWslDistro(), "bash", "-c", command)
+	distro := strings.TrimSpace(GetWslDistro())
+	if distro == "" {
+		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
+	}
+
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, GetShell(), "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -466,7 +519,7 @@ func executeWSLCommand(ctx context.Context, command string, skipCache bool) (str
 		resultSize := len(result)
 		if resultSize < 1024*1024 {
 			wslCache.Lock()
-			wslCache.m[command] = wslCacheEntry{
+			wslCache.m[distro+"\x00"+command] = wslCacheEntry{
 				output:    result,
 				err:       err,
 				timestamp: time.Now(),
@@ -517,12 +570,59 @@ func InvalidateWSLCache() {
 	wslCache.Unlock()
 }
 
+// recoverStaleWSL восстанавливает зависшую WSL-VM: выполняет wsl.exe --shutdown
+// (аналог ручного "пинка"), ждёт выгрузки vmmemWSL и возвращает VM в рабочее
+// состояние. Вызывается, когда первая команда к дистрибутиву не отвечает.
+func recoverStaleWSL() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stop := exec.CommandContext(ctx, WslExecutable(), "--shutdown")
+	stop.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = stop.Run()
+	if ctx.Err() != nil {
+		InvalidateWSLCache()
+		return
+	}
+
+	wakeCtx, wakeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer wakeCancel()
+	wake := exec.CommandContext(wakeCtx, WslExecutable(), "-l", "-q")
+	wake.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_, _ = wake.Output()
+
+	// Обновляем конфигурацию после восстановления WSL, чтобы старый/
+	// переименованный distro не остался в config cache.
+	if cfg, err := LoadConfig(); err == nil && cfg != nil {
+		InitConfigCache(cfg)
+	}
+	InvalidateWSLCache()
+}
+
 func CheckService() map[string]interface{} {
 	status := map[string]interface{}{"wsl": false, "nerdctl": false, "containerd": false, "error": ""}
-	_, err := RunWSL("echo ok")
-	if err != nil {
-		status["error"] = fmt.Sprintf("WSL '%s' не найден", GetWslDistro())
+
+	// Сначала убеждаемся, что есть реально установленный distro.
+	distro := strings.TrimSpace(GetWslDistro())
+	if distro == "" {
+		status["error"] = "WSL-дистрибутив не найден. Установите хотя бы один дистрибутив через Windows WSL."
 		return status
+	}
+
+	// Ограниченный по времени вызов: зависший wsl.exe не должен блокировать проверку.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := RunWSLWithCancel(ctx, "echo ok")
+	if err != nil || ctx.Err() != nil {
+		// Вероятно, VM в зависшем состоянии — пробуем восстановить и повторить один раз.
+		recoverStaleWSL()
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel2()
+		_, err = RunWSLWithCancel(ctx2, "echo ok")
+		if err != nil || ctx2.Err() != nil {
+			status["error"] = fmt.Sprintf("WSL '%s' не найден или не отвечает", GetWslDistro())
+			return status
+		}
 	}
 	status["wsl"] = true
 	if cdAvailable.Load() || CDCheck() == nil {
@@ -530,9 +630,9 @@ func CheckService() map[string]interface{} {
 		status["nerdctl"] = true
 		return status
 	}
-	out, _ := RunWSL("systemctl is-active containerd 2>/dev/null; echo '---'; which nerdctl 2>/dev/null")
+	out, _ := RunWSL("echo '---'; which nerdctl 2>/dev/null")
 	parts := strings.Split(out, "---")
-	if len(parts) > 0 && strings.TrimSpace(parts[0]) == "active" {
+	if IsServiceActive(GetSystemdService()) {
 		status["containerd"] = true
 	}
 	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
@@ -724,7 +824,7 @@ func BuildAndRunProject(ctx context.Context) (string, error) {
 	fmt.Println("🚀 Запуск стека через nerdctl compose...")
 	scriptsPath := GetScriptsPath()
 	startCmd := fmt.Sprintf(
-		"cd %s && if [[ -f backend/config/.env ]]; then set -a; source backend/config/.env; set +a; fi; nerdctl compose -f %s/compose.yaml up -d",
+		"cd %s && if [ -f backend/config/.env ]; then set -a; source backend/config/.env; set +a; fi; nerdctl compose -f %s/compose.yaml up -d",
 		shellQuote(projectPath),
 		shellQuote(scriptsPath),
 	)
@@ -833,7 +933,8 @@ func ClearContainerLogs(id string) error {
 }
 
 func CleanContainerdLogs() (string, error) {
-	out, err := RunWSL("sudo find /var/log -name '*.log' -mtime +7 -delete 2>/dev/null; echo '---'; sudo journalctl --vacuum-time=7d 2>/dev/null")
+	out, err := RunWSL("sudo find /var/log -name '*.log' -mtime +7 -delete 2>/dev/null; " +
+		"if command -v journalctl >/dev/null 2>&1; then sudo journalctl --vacuum-time=7d 2>/dev/null; fi")
 	return out, err
 }
 
@@ -883,8 +984,8 @@ func CleanUnusedVolumes(ctx context.Context) (string, error) {
 
 func CleanUnusedNetworks(ctx context.Context) (string, error) {
 	script := `
-mapfile -t all_nets < <(nerdctl network ls --format '{{.Name}}' 2>/dev/null)
-if [ ${#all_nets[@]} -eq 0 ]; then
+all_nets=$(nerdctl network ls --format '{{.Name}}' 2>/dev/null)
+if [ -z "$all_nets" ]; then
 	echo "Нет сетей для очистки"
 	exit 0
 fi
@@ -894,7 +995,7 @@ used_nets=$(nerdctl ps -a --format '{{json .}}' 2>/dev/null | \
 	tr ',' '\n' | sort -u)
 skip_nets="bridge host none default"
 removed=0
-for net in "${all_nets[@]}"; do
+for net in $all_nets; do
 	net=$(echo "$net" | xargs)
 	[ -z "$net" ] && continue
 	skip=0
@@ -907,7 +1008,7 @@ for net in "${all_nets[@]}"; do
 	fi
 	if nerdctl network rm "$net" >/dev/null 2>&1; then
 		echo "Удалена сеть: $net"
-		((removed++))
+		removed=$((removed+1))
 	else
 		echo "Не удалось удалить сеть: $net"
 	fi
@@ -928,17 +1029,17 @@ fi
 
 func CleanUntaggedImages(ctx context.Context) (string, error) {
 	script := `
-mapfile -t untagged < <(nerdctl images --format '{{.ID}}\t{{.Repository}}\t{{.Tag}}' 2>&1 | \
+untagged=$(nerdctl images --format '{{.ID}}\t{{.Repository}}\t{{.Tag}}' 2>&1 | \
 	awk -F'\t' '($2 == "<none>" || $3 == "<none>") && $1 != "" {print $1}')
-if [ ${#untagged[@]} -eq 0 ]; then
+if [ -z "$untagged" ]; then
 	echo "Образы без тегов не найдены"
 	exit 0
 fi
 removed=0
-for img_id in "${untagged[@]}"; do
+for img_id in $untagged; do
 	if nerdctl rmi -f "$img_id" >/dev/null 2>&1; then
 		echo "Удалён образ: $img_id"
-		((removed++))
+		removed=$((removed+1))
 	else
 		echo "Не удалось удалить образ: $img_id"
 	fi
@@ -1281,13 +1382,11 @@ echo "⚙️ Ограничение кэша: %s"
 size_bytes=$(du -sb /var/lib/buildkit 2>/dev/null | awk '{print $1}' || echo 0)
 limit_str="%s"
 limit_bytes=0
-if [[ "$limit_str" =~ ^([0-9]+)g$ ]]; then
-	limit_bytes=$(( ${BASH_REMATCH[1]} * 1024 * 1024 * 1024 ))
-elif [[ "$limit_str" =~ ^([0-9]+)m$ ]]; then
-	limit_bytes=$(( ${BASH_REMATCH[1]} * 1024 * 1024 ))
-elif [[ "$limit_str" =~ ^([0-9]+)k$ ]]; then
-	limit_bytes=$(( ${BASH_REMATCH[1]} * 1024 ))
-fi
+case "$limit_str" in
+  *[0-9]g) limit_bytes=$(( ${limit_str%%g} * 1024 * 1024 * 1024 )) ;;
+  *[0-9]m) limit_bytes=$(( ${limit_str%%m} * 1024 * 1024 )) ;;
+  *[0-9]k) limit_bytes=$(( ${limit_str%%k} * 1024 )) ;;
+esac
 if [ "$size_bytes" -gt "$limit_bytes" ] && [ "$limit_bytes" -gt 0 ]; then
 	echo "  ⚠️ Кэш превышает лимит! Принудительная очистка..."
 	buildctl --addr $addr prune --all --keep-storage=%s 2>/dev/null

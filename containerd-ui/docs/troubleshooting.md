@@ -4,6 +4,72 @@
 
 The complete access architecture is described in [concepts.md](concepts.md). Use [diagnostics.md](diagnostics.md) for environment checks and commands.
 
+## Alpine-Specific Issues
+
+### Service Management
+
+Alpine uses OpenRC, not systemd. If you see errors about `systemctl`:
+
+```bash
+# Check status
+rc-service containerd status
+
+# Start/stop/restart
+rc-service containerd start
+rc-service containerd stop
+rc-service containerd restart
+```
+
+### Containerd Not Listening on 50051
+
+On Alpine, containerd must be configured to listen on `0.0.0.0:50051`. Check the config:
+
+```bash
+cat /etc/containerd/config.toml | grep address
+```
+
+If the address is not set, create or update the config:
+
+```bash
+mkdir -p /etc/containerd
+cat > /etc/containerd/config.toml <<'TOML'
+version = 2
+[grpc]
+  address = "0.0.0.0:50051"
+TOML
+rc-service containerd restart
+```
+
+### BuildKit Not Starting
+
+On Alpine, BuildKit requires the `/run/buildkit` directory:
+
+```bash
+mkdir -p /run/buildkit
+chmod 777 /run/buildkit
+rc-service buildkitd start
+```
+
+### Package Installation Fails
+
+If `apk add` fails, update the repositories first:
+
+```bash
+apk update
+apk add --no-cache <package-name>
+```
+
+### Shell Issues
+
+Alpine uses `busybox ash` by default. If scripts fail with syntax errors, install bash:
+
+```bash
+apk add --no-cache bash
+chsh -s /bin/bash
+```
+
+Then set `"shell": "bash"` in `config.json`.
+
 ## WSL Is Not Found
 
 WSL and distribution checks are collected in [diagnostics.md](diagnostics.md). If the distribution is missing, install it using the instructions there.
@@ -27,8 +93,8 @@ sudo journalctl -u buildkit -n 100 --no-pager
 Make sure `containerd` is running and available inside WSL:
 
 ```bash
-wsl -d Ubuntu-24.04 -- systemctl status containerd
-wsl -d Ubuntu-24.04 -- ss -lnt | grep 50051
+wsl -d Debian -- systemctl status containerd
+wsl -d Debian -- ss -lnt | grep 50051
 ```
 
 If the port is not open, check whether it is blocked by a firewall or iptables. In most cases, starting the container runtime and running `nerdctl info` again resolves the issue.
@@ -135,8 +201,8 @@ Restart the application after editing the file manually.
 ## Useful Commands
 
 ```powershell
-wsl -d Ubuntu-24.04 -- nerdctl ps -a
-wsl -d Ubuntu-24.04 -- nerdctl compose -f /path/to/compose.yaml config
+wsl -d Debian -- nerdctl ps -a
+wsl -d Debian -- nerdctl compose -f /path/to/compose.yaml config
 ```
 
 ## Application Logs

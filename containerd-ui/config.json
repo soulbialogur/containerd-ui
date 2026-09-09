@@ -1,7 +1,19 @@
 {
   "language": "ru",
-  "project_path":"",
-  "wsl_distro": "",
+  "projects": [
+    {
+      "path": "C:\\Users\\Пользователь\\OneDrive\\Рабочий стол\\ai-chatbot-website",
+      "name": "",
+      "added": ""
+    }
+  ],
+  "active_project_path": "C:\\Users\\Пользователь\\OneDrive\\Рабочий стол\\ai-chatbot-website",
+  "project_path": "",
+  "wsl_distro": "Debian",
+  "shell": "",
+  "init_system": "",
+  "pkg_manager": "",
+  "privilege_cmd": "",
   "cd_port": 50051,
   "cd_namespace": "default",
   "scripts_path": "scripts/containerd",
@@ -15,6 +27,7 @@
   "volumes_cache_ttl": 5,
   "auto_refresh_interval": 3,
   "economy_mode": false,
+  "idle_daemon_stop_minutes": 2,
   "squash_layers": false,
   "compression": "zstd",
   "compression_level": 6,
@@ -40,6 +53,7 @@
   "buildkit_max_size": "5g",
   "deployment_proxy": "traefik",
   "deploy_network": "soul-dialogue",
+  "deploy_email": "",
   "deploy_service_backend": "backend",
   "deploy_service_frontend": "frontend",
   "deploy_service_backend_port": 8000,

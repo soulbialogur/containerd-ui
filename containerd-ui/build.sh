@@ -1,7 +1,13 @@
 #!/bin/bash
 # Скрипт для сборки containerd-ui в Windows .exe
+# Сборка выполняется в Debian/WSL2 и выпускает Windows .exe
 
 set -euo pipefail
+
+# Добавляем Go в PATH если его нет (нужно при запуске из PowerShell/не-интерактивный shell)
+if ! command -v go &> /dev/null; then
+    export PATH="/usr/local/go/bin:$PATH"
+fi
 
 # Определяем директорию скрипта (абсолютный путь, устойчивый к относительным вызовам и симлинкам)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -9,11 +15,17 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 echo "📦 Проверка зависимостей..."
 echo "   Директория: $SCRIPT_DIR"
 
-# Устанавливаем MinGW если его нет
+# Устанавливаем MinGW для кросс-компиляции (если нет)
 if ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
     echo "⚙️ Установка MinGW для кросс-компиляции..."
-    apt-get update > /dev/null 2>&1 || true
-    apt-get install -y mingw-w64 > /dev/null 2>&1 || true
+    if command -v apt-get &> /dev/null; then
+        apt-get update > /dev/null 2>&1 || true
+        # Debian 13+: gcc-mingw-w64-x86-64, старые: mingw-w64
+        apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 > /dev/null 2>&1 || \
+        apt-get install -y mingw-w64 > /dev/null 2>&1 || true
+    elif command -v apk &> /dev/null; then
+        apk add --no-cache mingw-w64-gcc > /dev/null 2>&1 || true
+    fi
 fi
 
 echo "📦 Загрузка зависимостей Go..."

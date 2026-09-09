@@ -18,7 +18,7 @@ Example configuration file:
 ```json
 {
   "project_path": "C:\\Users\\User\\OneDrive\\Desktop\\project",
-  "wsl_distro": "Ubuntu-24.04",
+  "wsl_distro": "Debian",
   "cd_port": 50051,
   "cd_namespace": "default",
   "scripts_path": "scripts/containerd",
@@ -60,7 +60,11 @@ Example configuration file:
 | Field | Description | Default |
 |---|---|---:|
 | `project_path` | Path to the project root containing `compose.yaml` or `docker-compose.yml` | `""` |
-| `wsl_distro` | WSL distribution where Linux commands run | `Ubuntu-24.04` |
+| `wsl_distro` | WSL distribution where Linux commands run | `Debian` |
+| `shell` | Shell for executing commands in WSL (`bash` or `sh`) | `""` (auto-detect) |
+| `init_system` | Init system for service management (`systemd`, `openrc`, or `none`) | `""` (auto-detect) |
+| `pkg_manager` | Package manager for install commands (`apt` or `apk`) | `""` (auto-detect) |
+| `privilege_cmd` | Command for privilege escalation (`sudo` or `doas`) | `""` (auto-detect) |
 | `cd_port` | gRPC port for the container runtime (`containerd`) | `50051` |
 | `cd_namespace` | Namespace for the containerd API | `default` |
 | `scripts_path` | Subdirectory containing container operation scripts | `scripts/containerd` |
@@ -92,6 +96,58 @@ Example configuration file:
 | `deploy_service_frontend` | Frontend service name in Compose | `frontend` |
 | `deploy_service_backend_port` | Backend internal container port | `8000` |
 | `deploy_service_frontend_port` | Frontend internal container port | `80` |
+
+## Environment Detection
+
+The application auto-detects your WSL environment on startup. It queries the following:
+
+- **Shell**: `bash` or `sh`
+- **Init System**: `systemd`, `openrc`, or `none`
+- **Package Manager**: `apt` or `apk`
+- **Privilege Escalation**: `sudo` or `doas`
+
+These settings are shown in the **WSL Environment** card in the Settings tab. You can also click the **Auto-Detect Environment** button to see the detected values.
+
+If auto-detection fails or you want to override it, set the following fields in `config.json`:
+
+### Environment Fields
+
+| Field | Description | Options |
+|---|---|---|
+| `shell` | Shell for executing commands in WSL | `bash`, `sh` |
+| `init_system` | Init system for service management | `systemd`, `openrc`, `none` |
+| `pkg_manager` | Package manager for install commands | `apt`, `apk` |
+| `privilege_cmd` | Command for privilege escalation | `sudo`, `doas` |
+
+Leave these fields empty (`""`) to use auto-detection. The app will query the WSL environment using a POSIX-compatible script and cache the result.
+
+### Example: Alpine Configuration
+
+For Alpine Linux:
+
+```json
+{
+  "wsl_distro": "Alpine",
+  "shell": "bash",
+  "init_system": "openrc",
+  "pkg_manager": "apk",
+  "privilege_cmd": "sudo"
+}
+```
+
+### Example: Debian Configuration (Default)
+
+For Debian:
+
+```json
+{
+  "wsl_distro": "Debian",
+  "shell": "bash",
+  "init_system": "systemd",
+  "pkg_manager": "apt",
+  "privilege_cmd": "sudo"
+}
+```
 
 ## Practical Recommendations
 
@@ -193,7 +249,7 @@ The application supports managing multiple projects from a single installation. 
     }
   ],
   "active_project_path": "C:\Users\User\OneDrive\Рабочий стол\ai-chatbot-website",
-  "wsl_distro": "Ubuntu-24.04",
+  "wsl_distro": "Debian",
   "cd_port": 50051,
   "cd_namespace": "default"
 }
@@ -286,7 +342,7 @@ Detailed behavior and usage scenarios are described in [concepts.md](concepts.md
 
 When values are not set, the application uses these defaults:
 
-- `wsl_distro = Ubuntu-24.04`
+- `wsl_distro = Debian`
 - `deployment_proxy = traefik`
 - `deploy_network = soul-dialogue` (for older configurations; explicitly setting the project network name is recommended)
 - `deploy_service_backend = backend`

@@ -369,7 +369,7 @@ func detectWSLIP(forceRefresh bool) string {
 	if !forceRefresh && cdIP != "" && cdIPValid.Load() {
 		return cdIP
 	}
-	cmd := exec.Command("wsl", "-d", GetWslDistro(), "hostname", "-I")
+	cmd := exec.Command(wslExecutable(), "-d", GetWslDistro(), "hostname", "-I")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()
 	if err != nil {
@@ -489,6 +489,7 @@ func Shutdown() {
 	cdAvailable.Store(false)
 	cdMu.Unlock()
 	cdIPValid.Store(false)
+
 }
 
 func AppContext() context.Context {
@@ -1304,7 +1305,7 @@ func CDCleanSystem() (string, error) {
 		"rm -rf /var/lib/nerdctl/%s/cache/* 2>/dev/null; "+
 			"rm -rf /var/lib/containerd/tmp/* 2>/dev/null; "+
 			"sudo find /var/log -name '*.log' -mtime +7 -delete 2>/dev/null; "+
-			"sudo journalctl --vacuum-time=7d 2>/dev/null; "+
+			"if command -v journalctl >/dev/null 2>&1; then sudo journalctl --vacuum-time=7d 2>/dev/null; fi; "+
 			"echo 'WSL_CLEANUP_DONE'",
 		GetCdNamespace(),
 	))
