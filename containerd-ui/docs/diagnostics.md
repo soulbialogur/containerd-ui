@@ -11,16 +11,18 @@ wsl --list --verbose
 If the distribution is not installed:
 
 ```powershell
-wsl --install Ubuntu-24.04
+wsl --install Debian
 ```
 
 Check from inside WSL:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- nerdctl version
-wsl -d Ubuntu-24.04 -- systemctl is-active containerd
-wsl -d Ubuntu-24.04 -- systemctl is-active buildkit
+wsl -d Debian -- nerdctl version
+wsl -d Debian -- systemctl is-active containerd
+wsl -d Debian -- systemctl is-active buildkit
 ```
+
+The expected distribution name in `config.json` is `"wsl_distro": "Debian"`. Do not use the UNC path `\\wsl.localhost\\Debian` as the distribution name.
 
 ## 2. Check containerd and nerdctl
 
@@ -78,7 +80,24 @@ To validate the credentials:
 cloudflared tunnel list --credentials-file /path/to/credentials.json
 ```
 
-## 5. Check Ports 80 and 443
+## 5. Check Build Tools
+
+These tools are needed only to build `containerd-ui.exe` from source. They are installed in Debian, not inside the Windows application:
+
+```bash
+go version
+x86_64-w64-mingw32-gcc --version
+x86_64-w64-mingw32-g++ --version
+```
+
+The repository build script uses these tools to compile a Windows `amd64` binary:
+
+```powershell
+cd "C:\Users\User\OneDrive\Desktop\ai-chatbot-website"
+bash containerd-ui/build.sh
+```
+
+## 6. Check Ports 80 and 443
 
 Windows:
 
@@ -95,7 +114,7 @@ sudo ss -tulpn | grep ':80\|:443'
 
 Ports `80` and `443` must be available for Traefik.
 
-## 6. Check DNS
+## 7. Check DNS
 
 ```bash
 nslookup example.com
@@ -109,7 +128,7 @@ getent hosts example.com
 
 Before deployment, the domain must resolve correctly and point to the target server.
 
-## 7. Check the Project's External Network
+## 8. Check the Project's External Network
 
 Use the network name from `deploy_network` in `config.json`. The examples below use `my-project-network`; replace it with your value.
 
@@ -134,7 +153,7 @@ networks:
     name: my-project-network
 ```
 
-## 8. Check the Project Path
+## 9. Check the Project Path
 
 The project path must point to the project root, not to the `compose.yaml` file.
 
