@@ -1,11 +1,15 @@
 # Quickstart
 
+## Runtime Stack
+
+The supported quickstart path is Windows 10/11 with WSL2 Debian, systemd, containerd, nerdctl, and BuildKit. Go and MinGW are needed only when building `containerd-ui.exe` from source.
+
 ## 1. Install the Prerequisites
 
-Make sure WSL2 is enabled on Windows and Ubuntu 24.04 is installed.
+Make sure WSL2 is enabled on Windows and Debian is installed.
 
 ```powershell
-wsl --install Ubuntu-24.04
+wsl --install Debian
 ```
 
 After installation, verify that WSL and the Linux environment are available:
@@ -27,33 +31,43 @@ The following must be available inside WSL:
 
 The container access model and fallback behavior are described in [concepts.md](concepts.md). For a first run, remember that the containerd gRPC API is the primary path and WSL + nerdctl is the fallback.
 
-Example installation:
+Install the Debian runtime components:
 
 ```bash
 sudo apt update
-sudo apt install -y containerd nerdctl
+sudo apt install -y containerd nerdctl buildkit
+sudo systemctl enable --now containerd
+sudo systemctl enable --now buildkit
 ```
 
 For detailed BuildKit installation, see [installation.md](installation.md). For diagnostics and manual startup, see [troubleshooting.md](troubleshooting.md).
 
-## 3. Build the Application
+## 3. Install Build Tools
 
-From the containerd-ui directory:
+Only required when compiling from source:
+
+```bash
+sudo apt install -y golang gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+```
+
+## 4. Build the Application
+
+From the repository root:
 
 ```powershell
-cd "C:\Users\User\OneDrive\Desktop\project"
-bash build.sh
+cd "C:\Users\User\OneDrive\Desktop\ai-chatbot-website"
+bash containerd-ui/build.sh
 ```
 
 The build should produce `containerd-ui.exe`.
 
-## 4. Start the Application
+## 5. Start the Application
 
 ```powershell
-Start-Process .\containerd-ui.exe
+Start-Process .\containerd-ui\containerd-ui.exe
 ```
 
-## 5. Set the Project Path
+## 6. Set the Project Path
 
 After starting the application, open the Settings tab and select the project root containing `compose.yaml` or `docker-compose.yml`.
 
@@ -79,7 +93,7 @@ This step is required before building or deploying. Without a project path, the 
 
 > Important: [project-requirements.md](project-requirements.md) defines the requirements for the external `deploy_network`, the Compose file, and the project root. It is the authoritative reference for a valid deployment.
 
-## 6. Check Component Status
+## 7. Check Component Status
 
 Open the Status tab and make sure the main components are working: WSL, containerd, BuildKit, nerdctl, and Cloudflare Tunnel if needed.
 
@@ -91,7 +105,7 @@ The corresponding icons should be green. If any component is inactive, fix the e
 
 When `economy_mode` is enabled, inactive tabs pause background updates. This reduces CPU, WSL, and containerd usage. See [concepts.md](concepts.md) for details about tab lifecycle behavior.
 
-## 7. Run the Project for the First Time
+## 8. Run the Project for the First Time
 
 In the Containers tab, click Build to start the project for the first time. After the build, check that:
 
@@ -101,7 +115,7 @@ In the Containers tab, click Build to start the project for the first time. Afte
 
 The build uses [configuration.md](configuration.md) and applies settings such as `squash_layers`, `compression`, `max_parallelism`, `buildkit_cache_ttl`, and `buildkit_max_size`. [concepts.md](concepts.md) describes BuildKit, progress reporting, and cancellation in detail.
 
-## 8. Deploy if Needed
+## 9. Deploy if Needed
 
 To publish the project on a domain, open the Deployment tab and choose:
 
@@ -128,7 +142,7 @@ Important:
 
 See [project-requirements.md](project-requirements.md) for project and network requirements, and [diagnostics.md](diagnostics.md) for environment checks and commands.
 
-## 9. Manage Containers
+## 10. Manage Containers
 
 ### Bulk Operations
 
@@ -163,7 +177,7 @@ When `economy_mode` is enabled, automatic refresh runs only for the active tab. 
 
 In short, updates pause while a tab is inactive, avoiding unnecessary requests to WSL/containerd.
 
-## 10. If Something Does Not Work
+## 11. If Something Does Not Work
 
 Start by checking that:
 

@@ -3,6 +3,7 @@ package ui
 import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +57,10 @@ func deploymentProxyConfigValue(uiValue string) string {
 }
 
 func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
-	config, _ := wsl.LoadConfig()
+	config, err := wsl.LoadConfig()
+	if err != nil || config == nil {
+		config = wsl.DefaultConfig()
+	}
 
 	// --- Переключатель языка ---
 	langRadio := widget.NewRadioGroup([]string{i18n.T("app.lang_ru"), i18n.T("app.lang_en")}, nil)
@@ -238,6 +242,10 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	}
 
 	entryDistro := makeSettingEntry(i18n.T("settings.wsl_distro_placeholder"))
+	entryShell := makeSettingEntry(i18n.T("settings.shell_placeholder"))
+	entryInitSystem := makeSettingEntry(i18n.T("settings.init_system_placeholder"))
+	entryPkgManager := makeSettingEntry(i18n.T("settings.pkg_manager_placeholder"))
+	entryPrivilegeCmd := makeSettingEntry(i18n.T("settings.privilege_cmd_placeholder"))
 	entryCdPort := makeSettingEntry(i18n.T("settings.grpc_port_placeholder"))
 	entryCdNamespace := makeSettingEntry(i18n.T("settings.namespace_placeholder"))
 	entryLogTail := makeSettingEntry(i18n.T("settings.log_tail_placeholder"))
@@ -337,6 +345,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	btnOpenExplorer := widget.NewButton(i18n.T("settings.open_explorer"), nil)
 	btnCheckPath := widget.NewButton(i18n.T("settings.check_path"), nil)
 	btnDetect := widget.NewButton(i18n.T("settings.auto_detect"), nil)
+	btnDetectEnv := widget.NewButton(i18n.T("settings.detect_env"), nil)
 	btnSave := widget.NewButton(i18n.T("settings.save"), nil)
 	btnReset := widget.NewButton(i18n.T("settings.reset"), nil)
 
@@ -344,6 +353,10 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		cfg, _ := wsl.LoadConfig()
 		entryPath.SetText(wsl.GetActiveProjectPath())
 		entryDistro.SetText(cfg.WslDistro)
+		entryShell.SetText(cfg.Shell)
+		entryInitSystem.SetText(cfg.InitSystem)
+		entryPkgManager.SetText(cfg.PkgManager)
+		entryPrivilegeCmd.SetText(cfg.PrivilegeCmd)
 		entryCdPort.SetText(strconv.Itoa(cfg.CdPort))
 		entryCdNamespace.SetText(cfg.CdNamespace)
 		entryLogTail.SetText(strconv.Itoa(cfg.LogTail))
@@ -454,8 +467,30 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				dialog.ShowCustom(i18n.T("settings.not_detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.not_detected_msg")), win)
 			}
 			btnDetect.Enable()
-			btnDetect.SetText("🔍 " + i18n.T("settings.auto_detect"))
+			btnDetect.SetText(i18n.T("settings.auto_detect"))
 			btnDetect.Refresh()
+		}()
+	}
+
+	btnDetectEnv.OnTapped = func() {
+		btnDetectEnv.Disable()
+		btnDetectEnv.SetText(i18n.T("settings.searching"))
+		btnDetectEnv.Refresh()
+
+		go func() {
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+
+			env := wsl.DetectEnvironment()
+			msg := fmt.Sprintf("🔧 Оболочка: %s\n📦 Пакетный менеджер: %s\n⚙️ Init-система: %s\n🔑 Повышение привилегий: %s",
+				env.Shell, env.PkgManager, env.InitSystem, env.PrivilegeCmd)
+			dialog.ShowCustom(i18n.T("settings.env_detected"), i18n.T("dialogs.ok"), widget.NewLabel(msg), win)
+			btnDetectEnv.Enable()
+			btnDetectEnv.SetText(i18n.T("settings.detect_env"))
+			btnDetectEnv.Refresh()
 		}()
 	}
 
@@ -472,8 +507,31 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			}
 			entryPath.SetText(path)
 		}
-		if distro := entryDistro.Text; distro != "" {
+		if distro := strings.TrimSpace(entryDistro.Text); distro != "" {
+			if !wsl.IsWslDistroAvailable(distro) {
+				detected := wsl.DetectWslDistro()
+				if detected == "" {
+					dialog.ShowError(fmt.Errorf("WSL-дистрибутив %q не найден. Проверьте установленные дистрибутивы командой: wsl.exe -l -q", distro), win)
+					return
+				}
+				entryDistro.SetText(detected)
+				distro = detected
+			}
 			cfg.WslDistro = distro
+		} else {
+			cfg.WslDistro = wsl.DetectWslDistro()
+		}
+		if shell := entryShell.Text; shell != "" {
+			cfg.Shell = shell
+		}
+		if initSys := entryInitSystem.Text; initSys != "" {
+			cfg.InitSystem = initSys
+		}
+		if pkgMgr := entryPkgManager.Text; pkgMgr != "" {
+			cfg.PkgManager = pkgMgr
+		}
+		if privCmd := entryPrivilegeCmd.Text; privCmd != "" {
+			cfg.PrivilegeCmd = privCmd
 		}
 		if portStr := entryCdPort.Text; portStr != "" {
 			if port, err := strconv.Atoi(portStr); err == nil {
@@ -725,7 +783,25 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
-	actionsCard := widget.NewCard(i18n.T("settings.actions"), "",
+	envCard := widget.NewCard(i18n.T("settings.environment"), i18n.T("settings.environment_hint"),
+		container.NewVBox(
+			widget.NewLabelWithStyle(i18n.T("settings.shell"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			makeSettingRow(entryShell),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle(i18n.T("settings.init_system"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			makeSettingRow(entryInitSystem),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle(i18n.T("settings.pkg_manager"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			makeSettingRow(entryPkgManager),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle(i18n.T("settings.privilege_cmd"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			makeSettingRow(entryPrivilegeCmd),
+			container.NewHBox(btnDetectEnv),
+		),
+	)
+
+	// Управление конфигурацией всегда находится в самом низу страницы.
+	actionsCard := widget.NewCard("", "",
 		container.NewVBox(
 			container.NewHBox(btnSave, btnReset),
 			checkEconomyMode,
@@ -744,6 +820,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	content := container.NewVBox(
 		container.NewPadded(langCard),
 		container.NewPadded(basicCard),
+		container.NewPadded(envCard),
 		container.NewPadded(buildCard),
 		container.NewPadded(proxyCard),
 		container.NewPadded(serviceCard),
@@ -751,6 +828,8 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		container.NewPadded(projectCard),
 		container.NewPadded(actionsCard),
 	)
+
+	updateUI()
 
 	return container.NewBorder(
 		nil, nil, nil, nil,

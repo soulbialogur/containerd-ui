@@ -490,7 +490,7 @@ func CheckDeploymentPrerequisites(ctx context.Context) error {
 				msg += fmt.Sprintf("  ❌ %s\n", m)
 			}
 			msg += "\n📦 Установите через:\n"
-			msg += "  sudo apt update && sudo apt install -y nerdctl containerd build-essential\n"
+			msg += "  " + PkgInstallCommand("nerdctl", "containerd", "build-essential") + "\n"
 			msg += "  cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/\n"
 		default:
 			msg = "В WSL не найдены необходимые инструменты:\n\n"
@@ -498,7 +498,7 @@ func CheckDeploymentPrerequisites(ctx context.Context) error {
 				msg += fmt.Sprintf("  ❌ %s\n", m)
 			}
 			msg += "\n📦 Установите через:\n"
-			msg += "  sudo apt update && sudo apt install -y nerdctl containerd build-essential\n"
+			msg += "  " + PkgInstallCommand("nerdctl", "containerd", "build-essential") + "\n"
 		}
 		return fmt.Errorf("%s", msg)
 	}
