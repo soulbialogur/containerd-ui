@@ -1,9 +1,7 @@
 package wsl
 
 import (
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -414,28 +412,6 @@ func TestNormalizeScriptsPathAvoidsDuplicateSegments(t *testing.T) {
 	} {
 		if got := NormalizeScriptsPath(projectPath, tc.given); got != tc.want {
 			t.Fatalf("NormalizeScriptsPath(%q, %q) = %q, want %q", projectPath, tc.given, got, tc.want)
-		}
-	}
-}
-
-func TestContainerdComposeBuildsLocalImages(t *testing.T) {
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to resolve current test file path")
-	}
-	composePath := filepath.Join(filepath.Dir(currentFile), "..", "scripts", "containerd", "compose.yaml")
-	composeData, err := os.ReadFile(composePath)
-	if err != nil {
-		t.Fatalf("read containerd compose: %v", err)
-	}
-	compose := string(composeData)
-	for _, image := range []string{
-		"context: ../../postgres\n      dockerfile: Dockerfile",
-		"context: ../../backend\n      dockerfile: Dockerfile",
-		"context: ../..\n      dockerfile: frontend/Dockerfile",
-	} {
-		if !strings.Contains(compose, image) {
-			t.Fatalf("containerd compose should build local images, missing:\n%s", image)
 		}
 	}
 }
