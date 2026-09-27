@@ -16,50 +16,47 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 	var volumes []wsl.Volume
 	selectedName := ""
 
-	table := widget.NewTable(
-		func() (int, int) { return len(volumes) + 1, 3 },
-		func() fyne.CanvasObject {
-			return widget.NewLabel("Wide Header Space Text Here")
-		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
-			label := o.(*widget.Label)
+	newVolumeRow := func() fyne.CanvasObject {
+		labels := make([]fyne.CanvasObject, 3)
+		for i := range labels {
+			label := widget.NewLabel("")
 			label.Wrapping = fyne.TextTruncate
+			labels[i] = label
+		}
+		return container.NewGridWithColumns(3, labels...)
+	}
 
-			if i.Row == 0 {
-				headers := []string{
-					i18n.T("volumes.header_name"),
-					i18n.T("volumes.header_type"),
-					i18n.T("volumes.header_mount"),
-				}
-				label.SetText(headers[i.Col])
-				label.TextStyle = fyne.TextStyle{Bold: true}
+	volumeList := widget.NewList(
+		func() int { return len(volumes) },
+		newVolumeRow,
+		func(id widget.ListItemID, object fyne.CanvasObject) {
+			if id < 0 || id >= len(volumes) {
 				return
 			}
-
-			v := volumes[i.Row-1]
-			switch i.Col {
-			case 0:
-				name := v.Name
-				if len(name) > 35 {
-					name = name[:32] + "..."
-				}
-				label.SetText(name)
-			case 1:
-				label.SetText(v.Driver)
-			case 2:
-				mp := v.Mountpoint
-				if len(mp) > 45 {
-					mp = "..." + mp[len(mp)-42:]
-				}
-				label.SetText(mp)
+			v := volumes[id]
+			labels := object.(*fyne.Container).Objects
+			name := v.Name
+			if len(name) > 35 {
+				name = name[:32] + "..."
+			}
+			mount := v.Mountpoint
+			if len(mount) > 45 {
+				mount = "..." + mount[len(mount)-42:]
+			}
+			values := []string{name, v.Driver, mount}
+			for i, value := range values {
+				labels[i].(*widget.Label).SetText(value)
 			}
 		},
 	)
 
-	table.SetColumnWidth(0, 100)
-	table.SetColumnWidth(1, 60)
-	table.SetColumnWidth(2, 140)
+	header := container.NewGridWithColumns(3,
+		widget.NewLabelWithStyle(i18n.T("volumes.header_name"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("volumes.header_type"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("volumes.header_mount"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	)
 
+	var btnRefresh *widget.Button
 	var refreshTimer *time.Timer
 	var lastRefresh time.Time
 
@@ -74,6 +71,8 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 		}
 
 		refreshTimer = time.AfterFunc(DebounceVolumeRefresh, func() {
+			safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("volumes.refresh"), true) })
+			defer safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("volumes.refresh"), false) })
 			select {
 			case <-wsl.AppContext().Done():
 				return
@@ -84,62 +83,61 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 			if err == nil {
 				volumes = data
 				safeUI(func() {
-					table.Refresh()
+					volumeList.Refresh()
 				})
 			}
 		})
 	}
 
-	table.OnSelected = func(id widget.TableCellID) {
-		if id.Row > 0 && id.Row-1 < len(volumes) {
-			selectedName = volumes[id.Row-1].Name
+	volumeList.OnSelected = func(id widget.ListItemID) {
+		if id >= 0 && id < len(volumes) {
+			selectedName = strings.TrimSpace(volumes[id].Name)
 		}
 	}
 
 	btnRemove := widget.NewButton(i18n.T("volumes.remove"), func() {
-		if selectedName != "" {
-			if strings.HasPrefix(selectedName, "soul-dialogue-") {
-				dialog.ShowCustom(
-					i18n.T("volumes.protected_title"),
-					i18n.T("dialogs.ok"),
-					widget.NewLabel(i18n.T("volumes.protected_msg")),
-					win,
-				)
-				return
-			}
-			dialog.ShowConfirm(
-				i18n.T("volumes.remove_title"),
-				i18n.T("volumes.confirm_remove", selectedName),
-				func(ok bool) {
-					if ok {
-						go func() {
-							select {
-							case <-wsl.AppContext().Done():
-								return
-							default:
-							}
-
-							wsl.RemoveVolume(selectedName)
-							data, err := wsl.ListVolumes()
-							if err == nil {
-								volumes = data
-								safeUI(func() {
-									table.Refresh()
-								})
-							}
-						}()
-						selectedName = ""
-					}
-				},
-				win,
-			)
+		selectedName = strings.TrimSpace(selectedName)
+		if selectedName == "" {
+			return
 		}
+		volumeName := selectedName
+		dialog.ShowConfirm(
+			i18n.T("volumes.remove_title"),
+			i18n.T("volumes.confirm_remove", volumeName),
+			func(ok bool) {
+				if ok {
+					go func(name string) {
+						select {
+						case <-wsl.AppContext().Done():
+							return
+						default:
+						}
+
+						removeErr := wsl.RemoveVolume(name)
+						data, err := wsl.ListVolumes()
+						if err == nil {
+							volumes = data
+							safeUI(func() {
+								volumeList.Refresh()
+							})
+						}
+						if removeErr != nil {
+							safeUI(func() {
+								dialog.ShowError(removeErr, win)
+							})
+							return
+						}
+						selectedName = ""
+					}(volumeName)
+				}
+			},
+			win,
+		)
 	})
 
-	btnRefresh := widget.NewButton(i18n.T("volumes.refresh"), refresh)
-
+	btnRefresh = widget.NewButton(i18n.T("volumes.refresh"), refresh)
 	topBar := container.NewHBox(btnRemove, btnRefresh)
 	refresh()
 
-	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, table))
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, container.NewBorder(header, nil, nil, nil, volumeList)))
 }

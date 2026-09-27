@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -300,65 +301,16 @@ var (
 	appCtx      context.Context
 	appCancel   context.CancelFunc
 
-	cdMu              sync.Mutex
-	cdIPValid         atomic.Bool
-	lastActivityTime  atomic.Int64
-	idleStopThreshold = 2 * time.Minute
+	cdMu      sync.Mutex
+	cdIPValid atomic.Bool
 )
 
 func init() {
 	cdBaseCtx = namespaces.WithNamespace(context.Background(), GetCdNamespace())
 	appCtx, appCancel = context.WithCancel(context.Background())
-	lastActivityTime.Store(time.Now().UnixNano())
-	startIdleDaemonController()
-}
-
-func setIdleDaemonThreshold(minutes int) {
-	if minutes > 0 {
-		idleStopThreshold = time.Duration(minutes) * time.Minute
-		return
-	}
-	idleStopThreshold = 2 * time.Minute
 }
 
 func SetIdleDaemonThresholdForRuntime(minutes int) {
-	setIdleDaemonThreshold(minutes)
-}
-
-func markDaemonActivity() {
-	lastActivityTime.Store(time.Now().UnixNano())
-}
-
-func startIdleDaemonController() {
-	go func() {
-		for {
-			select {
-			case <-appCtx.Done():
-				return
-			case <-time.After(15 * time.Second):
-				last := time.Unix(0, lastActivityTime.Load())
-				if !last.IsZero() && time.Since(last) >= idleStopThreshold {
-					_ = stopIdleDaemon()
-				}
-			}
-		}
-	}()
-}
-
-func stopIdleDaemon() error {
-	cdMu.Lock()
-	defer cdMu.Unlock()
-	if cdConn != nil {
-		_ = cdConn.Close()
-		cdConn = nil
-	}
-	if cdClient != nil {
-		_ = cdClient.Close()
-		cdClient = nil
-	}
-	cdAvailable.Store(false)
-	cdErr = nil
-	return nil
 }
 
 func DetectWSLIP() string {
@@ -595,12 +547,24 @@ func CDGetStats() ([]ContainerStat, error) {
 		return cached, nil
 	}
 	GlobalCacheManager.RecordMiss("stats")
-	out, err := RunWSL("nerdctl stats --no-stream --format '{{json .}}' 2>/dev/null")
-	if err != nil || out == "" {
+	out, err := runRootNerdctl(context.Background(), "stats --no-stream --format '{{json .}}'")
+	if err != nil {
 		GlobalCacheManager.RecordError("stats")
-		return []ContainerStat{}, nil
+		return nil, err
 	}
 	lines := strings.Split(out, "\n")
+	containerNames := make(map[string]string)
+	if namesOutput, namesErr := runRootNerdctl(context.Background(), "ps -a --format '{{json .}}'"); namesErr == nil {
+		for _, line := range strings.Split(namesOutput, "\n") {
+			var container struct {
+				ID   string `json:"ID"`
+				Name string `json:"Names"`
+			}
+			if json.Unmarshal([]byte(strings.TrimSpace(line)), &container) == nil && container.ID != "" {
+				containerNames[container.ID] = shortContainerName(container.Name)
+			}
+		}
+	}
 	var result []ContainerStat
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -621,73 +585,181 @@ func CDGetStats() ([]ContainerStat, error) {
 		}
 		result = append(result, ContainerStat{
 			ID:     id,
-			Name:   stat.Name,
+			Name:   containerNames[stat.ID],
 			CPU:    stat.CPUPerc,
 			Memory: stat.MemUsage,
 			NetIO:  stat.NetIO,
 			PIDs:   pids,
 		})
+		if result[len(result)-1].Name == "" {
+			result[len(result)-1].Name = stat.Name
+		}
+	}
+	if len(result) == 0 {
+		return result, nil
 	}
 	statsCache.Set(result)
 	return result, nil
 }
 
+func shortContainerName(name string) string {
+	name = strings.TrimPrefix(name, "soul-dialogue-")
+	name = strings.TrimPrefix(name, "containerd-")
+	if name == "" {
+		return "container"
+	}
+	return name
+}
+
 func CDGetContainerLogs(id string, tail int) (string, error) {
-	ns := GetCdNamespace()
-	pattern := fmt.Sprintf("/var/lib/nerdctl/%s/containers/%s*", ns, id)
-	out, err := RunWSL(fmt.Sprintf(
-		"logfile=$(find %s -name '*.log' 2>/dev/null | head -1); if [ -n \"$logfile\" ]; then tail -n %d \"%s\" 2>&1; else echo 'NO_LOGS_FOUND'; fi",
-		shellQuote(pattern), tail, shellQuote(pattern),
-	))
+	tailArg := "all"
+	if tail > 0 {
+		tailArg = strconv.Itoa(tail)
+	}
+	logsArgs := fmt.Sprintf("logs --tail %s", tailArg)
+	startedAt, inspectErr := runRootNerdctl(context.Background(), fmt.Sprintf("inspect --format '{{.State.StartedAt}}' %s", shellQuote(id)))
+	if inspectErr == nil {
+		if normalizedStart := normalizeContainerStartTime(startedAt); normalizedStart != "" {
+			logsArgs += " --since " + shellQuote(normalizedStart)
+		}
+	}
+	logsArgs += " " + shellQuote(id)
+	out, err := runRootNerdctl(context.Background(), logsArgs)
 	if err != nil {
+		if detail := strings.TrimSpace(out); detail != "" {
+			return "", fmt.Errorf("не удалось получить логи контейнера %s: %s", id, detail)
+		}
 		return "", err
 	}
-	if strings.TrimSpace(out) == "NO_LOGS_FOUND" {
+	if strings.TrimSpace(out) == "" {
 		return "", fmt.Errorf("логи для контейнера %s не найдены", id)
 	}
 	return out, nil
 }
 
-func CDClearContainerLogs(id string) error {
-	ns := GetCdNamespace()
-	pattern := fmt.Sprintf("/var/lib/nerdctl/%s/containers/%s*", ns, id)
-	_, err := RunWSL(fmt.Sprintf(
-		"logfile=$(find %s -name '*.log' 2>/dev/null | head -1); [ -n \"$logfile\" ] && truncate -s 0 \"$logfile\" 2>/dev/null",
-		shellQuote(pattern),
+func normalizeContainerStartTime(raw string) string {
+	raw = strings.ReplaceAll(raw, `\x0a`, "")
+	raw = strings.ReplaceAll(raw, `\n`, "")
+	raw = strings.ReplaceAll(raw, `\r`, "")
+	raw = strings.Trim(raw, " \t\r\n\\\"'")
+	if _, err := time.Parse(time.RFC3339Nano, raw); err != nil {
+		return ""
+	}
+	return raw
+}
+
+func CDGetContainerStartupLogs(id string, tail int) (string, error) {
+	inspect, err := runRootNerdctl(context.Background(), fmt.Sprintf(
+		"inspect --format '{{.Name}}\nstatus={{.State.Status}}\nexit_code={{.State.ExitCode}}\nerror={{.State.Error}}\nrestart_count={{.RestartCount}}\nlog_path={{.LogPath}}' %s",
+		shellQuote(id),
 	))
+	if err != nil {
+		return "", err
+	}
+
+	result := strings.TrimSpace(inspect)
+	status := ""
+	for _, line := range strings.Split(inspect, "\n") {
+		if strings.HasPrefix(line, "status=") {
+			status = strings.TrimSpace(strings.TrimPrefix(line, "status="))
+		}
+	}
+	if status == "running" {
+		lines := strings.Split(result, "\n")
+		filtered := lines[:0]
+		for _, line := range lines {
+			if strings.HasPrefix(line, "error=") {
+				continue
+			}
+			filtered = append(filtered, line)
+		}
+		result = strings.Join(filtered, "\n")
+	}
+	for _, line := range strings.Split(inspect, "\n") {
+		if !strings.HasPrefix(line, "log_path=") {
+			continue
+		}
+		logPath := strings.TrimSpace(strings.TrimPrefix(line, "log_path="))
+		if logPath == "" {
+			continue
+		}
+		logOutput, logErr := runWSLAsRootWithTimeout(
+			"tail -n "+strconv.Itoa(tail)+" "+shellQuote(logPath)+" 2>/dev/null || true",
+			10*time.Second,
+		)
+		if logErr == nil && strings.TrimSpace(logOutput) != "" {
+			result += "\n\n--- runtime log ---\n" + strings.TrimSpace(logOutput)
+		}
+		break
+	}
+	return result, nil
+}
+
+func CDClearContainerLogs(id string) error {
+	inspect, err := runRootNerdctl(context.Background(), fmt.Sprintf("inspect --format '{{.LogPath}}' %s", shellQuote(id)))
+	if err != nil {
+		return err
+	}
+	logPath := cleanContainerLogPath(inspect)
+	if logPath == "" {
+		return fmt.Errorf("путь к логам контейнера %s не найден", id)
+	}
+	_, err = runWSLAsRootWithTimeout("truncate -s 0 "+shellQuote(logPath), 10*time.Second)
 	return err
 }
 
+func cleanContainerLogPath(raw string) string {
+	cleaned := strings.TrimSpace(strings.ReplaceAll(raw, "\x00", ""))
+	if strings.ContainsAny(cleaned, "\r\n") || !strings.HasPrefix(cleaned, "/") {
+		return ""
+	}
+	return cleaned
+}
+
 func CDGetDBInfo(volumeName string) (string, []string, error) {
-	client, err := getCDClient()
-	if err != nil {
-		return cdGetDBInfoFallback(volumeName)
-	}
-	ctx, cancel := cdCtx(TimeoutMedium)
-	defer cancel()
-	store := client.ContainerService()
-	containers, err := store.List(ctx)
-	if err != nil {
-		return cdGetDBInfoFallback(volumeName)
-	}
-	var mountpoint string
-	for _, c := range containers {
-		if _, ok := c.Labels["nerdctl/volume."+volumeName]; ok {
-			ns := GetCdNamespace()
-			mountpoint = "/var/lib/nerdctl/" + ns + "/volumes/" + volumeName + "/_data"
-			break
+	mountpoint := volumeDataPath(volumeName)
+	lookup, lookupErr := runRootNerdctl(context.Background(), "volume ls --format '{{json .}}'")
+	if lookupErr == nil {
+		for _, line := range strings.Split(lookup, "\n") {
+			var volume struct {
+				Name       string `json:"Name"`
+				Directory  string `json:"Directory"`
+				Mountpoint string `json:"Mountpoint"`
+			}
+			if json.Unmarshal([]byte(strings.TrimSpace(line)), &volume) == nil {
+				if volume.Mountpoint == "" {
+					volume.Mountpoint = volume.Directory
+				}
+			}
+			if volume.Name != "" &&
+				(strings.HasSuffix(volume.Name, volumeName) || volume.Name == volumeName) &&
+				volume.Mountpoint != "" {
+				mountpoint = volume.Mountpoint
+				break
+			}
 		}
 	}
 	if mountpoint == "" {
-		ns := GetCdNamespace()
-		mountpoint = "/var/lib/nerdctl/" + ns + "/volumes/" + volumeName + "/_data"
+		return "", nil, fmt.Errorf("путь к тому базы данных %s не найден", volumeName)
 	}
-	out, err := RunWSL(fmt.Sprintf(
-		"du -sh %s 2>/dev/null; echo '===FILES==='; find %s -type f 2>/dev/null | head -50",
-		shellQuote(mountpoint), shellQuote(mountpoint),
-	))
+	dbPath := mountpoint
+	pgdataPath := mountpoint + "/pgdata"
+	if out, err := runWSLAsRootWithTimeout("test -d "+shellQuote(pgdataPath), TimeoutFast); err == nil && strings.TrimSpace(out) == "" {
+		dbPath = pgdataPath
+	}
+	quotedDBPath := shellQuote(dbPath)
+	out, err := runWSLAsRootWithTimeout(fmt.Sprintf(
+		"if [ ! -d %s ]; then echo '===ERROR==='; echo \"Том не найден: %s\"; exit 1; fi; "+
+			"du -sh %s; echo '===FILES==='; "+
+			"find %s -mindepth 1 -maxdepth 3 -printf '%%y\\t%%s\\t%%P\\n' | sort -k3 | head -n 500",
+		quotedDBPath, dbPath, quotedDBPath, quotedDBPath,
+	), TimeoutMedium)
 	if err != nil {
-		return "", nil, err
+		details := strings.TrimSpace(out)
+		if details != "" {
+			return "", nil, fmt.Errorf("не удалось прочитать том %s: %w: %s", volumeName, err, details)
+		}
+		return "", nil, fmt.Errorf("не удалось прочитать том %s: %w", volumeName, err)
 	}
 	parts := strings.SplitN(out, "===FILES===", 2)
 	size := "—"
@@ -701,42 +773,48 @@ func CDGetDBInfo(volumeName string) (string, []string, error) {
 	if len(parts) > 1 {
 		for _, line := range strings.Split(parts[1], "\n") {
 			line = strings.TrimSpace(line)
-			if line != "" {
-				files = append(files, strings.TrimPrefix(line, mountpoint))
+			fields := strings.SplitN(line, "\t", 3)
+			if len(fields) == 3 && fields[2] != "" {
+				kind := "FILE"
+				switch fields[0] {
+				case "d":
+					kind = "DIR"
+				case "l":
+					kind = "LINK"
+				}
+				files = append(files, fmt.Sprintf("%-4s %8s  %s", kind, humanBytes(fields[1]), fields[2]))
 			}
 		}
 	}
 	return size, files, nil
 }
 
-func cdGetDBInfoFallback(volumeName string) (string, []string, error) {
-	ns := GetCdNamespace()
-	mp := "/var/lib/nerdctl/" + ns + "/volumes/" + volumeName + "/_data"
-	out, err := RunWSL(fmt.Sprintf(
-		"du -sh %s 2>/dev/null; echo '===FILES==='; find %s -type f 2>/dev/null | head -50",
-		shellQuote(mp), shellQuote(mp),
-	))
+func humanBytes(value string) string {
+	bytes, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
-		return "", nil, err
+		return value
 	}
-	parts := strings.SplitN(out, "===FILES===", 2)
-	size := "—"
-	if len(parts) > 0 {
-		fields := strings.Fields(strings.TrimSpace(parts[0]))
-		if len(fields) > 0 {
-			size = fields[0]
+	units := []string{"B", "K", "M", "G", "T"}
+	unit := 0
+	amount := float64(bytes)
+	for amount >= 1024 && unit < len(units)-1 {
+		amount /= 1024
+		unit++
+	}
+	if unit == 0 {
+		return fmt.Sprintf("%d%s", bytes, units[unit])
+	}
+	return fmt.Sprintf("%.1f%s", amount, units[unit])
+}
+
+func volumeDataPath(volumeName string) string {
+	if volumeName == GetDBVolumeName() {
+		if projectPath := GetProjectPathWSL(); projectPath != "" {
+			return projectPath + "/.containerd-data/postgres"
 		}
 	}
-	var files []string
-	if len(parts) > 1 {
-		for _, line := range strings.Split(parts[1], "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				files = append(files, strings.TrimPrefix(line, mp))
-			}
-		}
-	}
-	return size, files, nil
+	ns := GetCdNamespace()
+	return "/var/lib/nerdctl/" + ns + "/volumes/" + volumeName + "/_data"
 }
 
 func CDListContainers(all bool) ([]Container, error) {
@@ -752,35 +830,6 @@ func CDListContainers(all bool) ([]Container, error) {
 		}
 		return running, nil
 	}
-	client, err := getCDClient()
-	if err == nil {
-		ctx, cancel := cdCtx(TimeoutMedium)
-		defer cancel()
-		store := client.ContainerService()
-		list, err := store.List(ctx)
-		if err == nil {
-			result := make([]Container, 0, len(list))
-			for _, c := range list {
-				status, ok := containerStatusCache.get(c.ID)
-				if !ok {
-					status = determineContainerStatus(client, ctx, c.ID)
-					containerStatusCache.set(c.ID, status)
-				}
-				if !all && !isContainerRunning(status) {
-					continue
-				}
-				result = append(result, normalizeContainer(
-					c.ID,
-					c.Labels["nerdctl/name"],
-					c.Image,
-					status,
-					c.Labels["nerdctl/ports"],
-				))
-			}
-			containersCache.Set(result)
-			return result, nil
-		}
-	}
 	return listContainersFallback(all)
 }
 
@@ -789,8 +838,11 @@ func listContainersFallback(all bool) ([]Container, error) {
 	if all {
 		flag = "-a "
 	}
-	out, err := RunWSL("nerdctl ps " + flag + "--format '{{json .}}' 2>/dev/null")
-	if err != nil || out == "" {
+	out, err := runRootNerdctl(context.Background(), "ps "+flag+"--format '{{json .}}' 2>/dev/null")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
 		return []Container{}, nil
 	}
 	var result []Container
@@ -897,55 +949,11 @@ func CDListImages() ([]Image, error) {
 	if cached, ok := imagesCache.Get(); ok {
 		return cached, nil
 	}
-	client, err := getCDClient()
-	if err == nil {
-		ctx, cancel := cdCtx(TimeoutMedium)
-		defer cancel()
-		store := client.ImageService()
-		imgs, err := store.List(ctx)
-		if err == nil {
-			result := make([]Image, 0, len(imgs))
-			sizeMap := func() map[string]int64 {
-				defer func() { recover() }()
-				return getImageSizes(ctx, imgs)
-			}()
-			if sizeMap == nil {
-				sizeMap = make(map[string]int64)
-			}
-			for _, img := range imgs {
-				repo, tag := cachedSplitImageRef(img.Name)
-				digest := img.Target.Digest.String()
-				id := digest
-				if len(id) > 12 {
-					id = id[len(id)-12:]
-				}
-				size := sizeMap[digest]
-				sizeStr := cachedHumanSize(size)
-				if size == 0 {
-					sizeStr = "—"
-				}
-				createdStr := ""
-				if !img.CreatedAt.IsZero() {
-					createdStr = img.CreatedAt.Format("2006-01-02 15:04")
-				}
-				result = append(result, Image{
-					ID:         id,
-					Repository: repo,
-					Tag:        tag,
-					Size:       sizeStr,
-					CreatedAt:  createdStr,
-					sizeBytes:  size,
-				})
-			}
-			imagesCache.Set(result)
-			return result, nil
-		}
-	}
 	return listImagesFallback()
 }
 
 func listImagesFallback() ([]Image, error) {
-	out, err := RunWSL("nerdctl images --format '{{json .}}' 2>/dev/null")
+	out, err := runRootNerdctl(context.Background(), "images --format '{{json .}}' 2>/dev/null")
 	if err != nil || out == "" {
 		return []Image{}, nil
 	}
@@ -955,24 +963,22 @@ func listImagesFallback() ([]Image, error) {
 		if line == "" {
 			continue
 		}
-		var img struct {
-			Repository string `json:"Repository"`
-			Tag        string `json:"Tag"`
-			ID         string `json:"ID"`
-			Size       string `json:"Size"`
-		}
-		if err := json.Unmarshal([]byte(line), &img); err != nil {
+		img, err := parseImageLine(line)
+		if err != nil {
 			continue
 		}
-		result = append(result, Image{
-			ID:         img.ID,
-			Repository: img.Repository,
-			Tag:        img.Tag,
-			Size:       img.Size,
-		})
+		result = append(result, img)
 	}
 	imagesCache.Set(result)
 	return result, nil
+}
+
+func parseImageLine(line string) (Image, error) {
+	var img Image
+	if err := json.Unmarshal([]byte(line), &img); err != nil {
+		return Image{}, err
+	}
+	return img, nil
 }
 
 func getImageSizes(ctx context.Context, imgs []images.Image) map[string]int64 {
@@ -1065,26 +1071,58 @@ func CDListVolumes() ([]Volume, error) {
 	if cached, ok := volumesCache.Get(); ok {
 		return cached, nil
 	}
-	ns := GetCdNamespace()
-	base := "/var/lib/nerdctl/" + ns + "/volumes"
-	out, err := RunWSL("ls -1 " + shellQuote(base) + " 2>/dev/null")
+	out, err := runRootNerdctl(context.Background(), "volume ls --format '{{json .}}' 2>/dev/null")
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
-	var result []Volume
-	for _, name := range strings.Split(out, "\n") {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		result = append(result, Volume{
-			Name:       name,
-			Driver:     "local",
-			Mountpoint: base + "/" + name + "/_data",
-		})
-	}
+	result := parseVolumeLines(out)
 	volumesCache.Set(result)
 	return result, nil
+}
+
+// parseVolumeLines разбирает вывод "nerdctl volume ls --format '{{json .}}'",
+// пропуская пустые строки и мусор (диагностику WSL, предупреждения nerdctl).
+func parseVolumeLines(out string) []Volume {
+	var result []Volume
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		volume, err := parseVolumeLine(line)
+		if err != nil || volume.Name == "" {
+			continue
+		}
+		result = append(result, volume)
+	}
+	return result
+}
+
+func parseVolumeLine(line string) (Volume, error) {
+	var volume struct {
+		Name       string `json:"Name"`
+		Driver     string `json:"Driver"`
+		Mountpoint string `json:"Mountpoint"`
+		Directory  string `json:"Directory"`
+	}
+	if err := json.Unmarshal([]byte(line), &volume); err != nil {
+		return Volume{}, err
+	}
+	volume.Name = strings.TrimSpace(volume.Name)
+	volume.Driver = strings.TrimSpace(volume.Driver)
+	volume.Mountpoint = strings.TrimSpace(volume.Mountpoint)
+	volume.Directory = strings.TrimSpace(volume.Directory)
+	if volume.Mountpoint == "" {
+		volume.Mountpoint = volume.Directory
+	}
+	if volume.Driver == "" {
+		volume.Driver = "local"
+	}
+	return Volume{
+		Name:       volume.Name,
+		Driver:     volume.Driver,
+		Mountpoint: volume.Mountpoint,
+	}, nil
 }
 
 func CDGetUsedVolumes(ctx context.Context) (map[string]bool, error) {
@@ -1174,7 +1212,7 @@ func CDStopContainer(id string) error {
 			}
 		}
 	}
-	_, err = RunWSL("nerdctl stop " + shellQuote(id) + " 2>/dev/null")
+	_, err = runRootNerdctl(context.Background(), "stop "+shellQuote(id))
 	return err
 }
 
@@ -1214,64 +1252,90 @@ func CDStartContainer(id string) error {
 			}
 		}
 	}
-	_, err = RunWSL("nerdctl start " + shellQuote(id) + " 2>/dev/null")
+	_, err = runRootNerdctl(context.Background(), "start "+shellQuote(id))
 	return err
 }
 
 func CDRestartContainer(id string) error {
 	if err := CDStopContainer(id); err != nil {
-		return err
+		return fmt.Errorf("остановка через containerd: %w", err)
 	}
-	return CDStartContainer(id)
+	if err := CDStartContainer(id); err != nil {
+		return fmt.Errorf("запуск через containerd: %w", err)
+	}
+	return nil
 }
 
 func CDRemoveContainer(id string) error {
-	client, err := getCDClient()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cdCtx(TimeoutSlow)
-	defer cancel()
-	container, err := client.LoadContainer(ctx, id)
-	if err != nil {
-		return err
-	}
-	if task, err := container.Task(ctx, nil); err == nil {
-		_ = task.Kill(ctx, syscall.SIGKILL)
-		_, _ = task.Delete(ctx)
-	}
-	return container.Delete(ctx)
+	_, err := runRootNerdctl(context.Background(), "rm -f "+shellQuote(id))
+	return err
 }
 
 func CDRemoveImage(ref string) error {
-	client, err := getCDClient()
-	if err == nil {
-		ctx, cancel := cdCtx(TimeoutSlow)
-		defer cancel()
-		store := client.ImageService()
-		img, err := store.Get(ctx, ref)
-		if err == nil {
-			return store.Delete(ctx, img.Name)
-		}
-		imgs, err := store.List(ctx)
-		if err == nil {
-			for _, img := range imgs {
-				digest := img.Target.Digest.String()
-				if strings.HasSuffix(digest, ref) || img.Name == ref {
-					return store.Delete(ctx, img.Name)
-				}
-			}
-		}
-	}
-	_, err = RunWSL("nerdctl rmi -f " + shellQuote(ref) + " 2>/dev/null")
+	_, err := runRootNerdctl(context.Background(), "rmi -f "+shellQuote(ref))
 	return err
 }
 
+func lookupVolumeMountpoint(name string) string {
+	out, err := runRootNerdctl(context.Background(), "volume ls --format '{{json .}}'")
+	if err != nil {
+		return ""
+	}
+	for _, volume := range parseVolumeLines(out) {
+		if volume.Name == name {
+			return volume.Mountpoint
+		}
+	}
+	return ""
+}
+
 func CDRemoveVolume(name string) error {
-	ns := GetCdNamespace()
-	base := "/var/lib/nerdctl/" + ns + "/volumes/" + name
-	_, err := RunWSL("rm -rf " + shellQuote(base))
-	return err
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("имя тома не может быть пустым")
+	}
+
+	mountpoint := lookupVolumeMountpoint(name)
+	output, removalErr := runRootNerdctl(context.Background(), volumeRemoveCommand(name))
+	if removalErr != nil {
+		// Для мёртвых orphan-томов containerd может держать dead snapshot/лейбл,
+		// даже когда сам контейнер удалён. Сначала убираем stale snapshot, затем
+		// повторяем ручное удаление — это явно пользовательский сценарий.
+		if cleanupDeadVolumeSnapshot(name) {
+			output, removalErr = runRootNerdctl(context.Background(), volumeRemoveCommand(name))
+		}
+		if removalErr != nil {
+			retryOutput, retryErr := runRootNerdctl(context.Background(), "volume rm "+shellQuote(name))
+			if retryErr != nil {
+				detail := strings.TrimSpace(output)
+				if detail == "" {
+					detail = strings.TrimSpace(retryOutput)
+				}
+				if detail == "" {
+					detail = retryErr.Error()
+				}
+				return fmt.Errorf("не удалось удалить том %s: %s", name, detail)
+			}
+		}
+	}
+
+	var cleanupErr error
+	for _, path := range volumeRemovalTargets(name, mountpoint) {
+		if _, err := runWSLAsRootWithTimeout(
+			"if [ -e "+shellQuote(path)+" ]; then rm -rf "+shellQuote(path)+"; fi; true",
+			TimeoutMedium,
+		); err != nil && cleanupErr == nil {
+			cleanupErr = err
+		}
+	}
+
+	InvalidateWSLCache()
+	CDInvalidateVolumesCache()
+	GlobalCacheManager.Invalidate(CacheEventVolumes, "after-volume-remove")
+	if cleanupErr != nil {
+		return cleanupErr
+	}
+	return nil
 }
 
 func CDCleanSystem() (string, error) {

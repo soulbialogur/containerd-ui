@@ -23,8 +23,11 @@ func BuildDatabaseTab() fyne.CanvasObject {
 		},
 	)
 
-	btnCheck := widget.NewButton(i18n.T("database.check"), func() {
+	var btnCheck *widget.Button
+	btnCheck = widget.NewButton(i18n.T("database.check"), func() {
 		go func() {
+			safeUI(func() { setRefreshButtonLoading(btnCheck, i18n.T("database.check"), true) })
+			defer safeUI(func() { setRefreshButtonLoading(btnCheck, i18n.T("database.check"), false) })
 			select {
 			case <-wsl.AppContext().Done():
 				return
@@ -32,13 +35,15 @@ func BuildDatabaseTab() fyne.CanvasObject {
 			}
 
 			size, dbFiles, err := wsl.GetDBInfo(volName)
-			if err == nil {
-				lblSize.SetText(i18n.T("database.size", size))
-				files = dbFiles
-				filesList.Refresh()
-			} else {
-				lblSize.SetText(i18n.T("common.error") + ": " + err.Error())
-			}
+			safeUI(func() {
+				if err == nil {
+					lblSize.SetText(i18n.T("database.size", size))
+					files = dbFiles
+					filesList.Refresh()
+				} else {
+					lblSize.SetText(i18n.T("common.error") + ": " + err.Error())
+				}
+			})
 		}()
 	})
 

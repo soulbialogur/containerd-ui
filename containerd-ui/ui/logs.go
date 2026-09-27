@@ -3,6 +3,7 @@ package ui
 import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -12,6 +13,8 @@ import (
 func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	var containers []wsl.Container
 	selectedID := ""
+	var liveTicker *time.Ticker
+	var liveStop chan struct{}
 
 	logText := widget.NewMultiLineEntry()
 	logText.Wrapping = fyne.TextWrapWord
@@ -44,6 +47,38 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 		}()
 	}
 
+	stopLiveLogs := func() {
+		if liveTicker != nil {
+			liveTicker.Stop()
+			liveTicker = nil
+		}
+		if liveStop != nil {
+			close(liveStop)
+			liveStop = nil
+		}
+	}
+
+	startLiveLogs := func() {
+		stopLiveLogs()
+		if selectedID == "" {
+			return
+		}
+		liveTicker = time.NewTicker(time.Second)
+		liveStop = make(chan struct{})
+		go func(id string, ticker *time.Ticker, stop <-chan struct{}) {
+			for {
+				select {
+				case <-ticker.C:
+					loadLogs(id)
+				case <-stop:
+					return
+				case <-wsl.AppContext().Done():
+					return
+				}
+			}
+		}(selectedID, liveTicker, liveStop)
+	}
+
 	selector := widget.NewSelect([]string{}, func(name string) {
 		for _, c := range containers {
 			displayName := c.Name
@@ -53,6 +88,9 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			if displayName == name {
 				selectedID = c.ID
 				loadLogs(selectedID)
+				if liveTicker != nil {
+					startLiveLogs()
+				}
 				return
 			}
 		}
@@ -71,28 +109,53 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 					logText.SetText(i18n.T("op.error", err.Error()))
 					return
 				}
+				selectedName := ""
+				for _, c := range containers {
+					if c.ID == selectedID {
+						selectedName = c.Name
+						break
+					}
+				}
 				containers = data
 				names := make([]string, 0, len(containers))
+				newSelectedID := ""
 				for _, c := range containers {
 					displayName := c.Name
 					if displayName == "" {
 						displayName = c.ID
 					}
 					names = append(names, displayName)
+					if selectedName != "" && displayName == selectedName {
+						newSelectedID = c.ID
+					}
 				}
+				selectedID = newSelectedID
 				selector.Options = names
 				selector.Refresh()
+				if selectedName != "" && newSelectedID != "" {
+					selector.SetSelected(selectedName)
+				}
+				if newSelectedID != "" {
+					loadLogs(newSelectedID)
+				} else {
+					logText.SetText(i18n.T("logs.select_hint"))
+					logText.Refresh()
+				}
 			})
 		}()
 	}
 
 	btnRefresh := widget.NewButton(i18n.T("logs.refresh"), func() {
-		if selectedID != "" {
-			loadLogs(selectedID)
-		}
+		refresh()
 	})
 
-	btnRefreshList := widget.NewButton(i18n.T("logs.list"), refresh)
+	liveCheck := widget.NewCheck(i18n.T("logs.live"), func(checked bool) {
+		if checked {
+			startLiveLogs()
+		} else {
+			stopLiveLogs()
+		}
+	})
 
 	btnClearLogs := widget.NewButton(i18n.T("logs.clear"), func() {
 		if selectedID == "" {
@@ -123,8 +186,8 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	topBar := container.NewHBox(
 		widget.NewLabel(i18n.T("logs.container")),
 		selector,
-		btnRefreshList,
 		btnRefresh,
+		liveCheck,
 		btnClearLogs,
 	)
 

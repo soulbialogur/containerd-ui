@@ -43,10 +43,18 @@ func (d *darkTheme) Color(name fyne.ThemeColorName, v fyne.ThemeVariant) color.C
 		return accentPrimary
 	case theme.ColorNameButton:
 		return bgTertiary
+	case theme.ColorNameHeaderBackground:
+		return bgSecondary
 	case theme.ColorNameInputBackground:
 		return bgSecondary
 	case theme.ColorNameHover:
 		return bgHover
+	case theme.ColorNamePressed:
+		return bgActive
+	case theme.ColorNameSelection:
+		return accentPrimary
+	case theme.ColorNameSeparator, theme.ColorNameShadow:
+		return borderColor
 	case theme.ColorNameDisabled:
 		return textMuted
 	case theme.ColorNameScrollBar:

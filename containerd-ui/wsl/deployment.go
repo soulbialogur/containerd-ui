@@ -577,10 +577,10 @@ func ensureDeploymentServices(ctx context.Context, projectPath string, backend, 
 	)
 	output, err := RunWSLWithCancel(ctx, command)
 	if err != nil {
-		return output, fmt.Errorf("не удалось запустить выбранные сервисы (%s): %w", strings.Join(services, ", "), err)
+		return output, fmt.Errorf("не удалось запустить выбранные сервисы (%s): %w\nВывод nerdctl compose:\n%s", strings.Join(services, ", "), err, strings.TrimSpace(output))
 	}
 	if err := verifyRunningContainers(ctx, projectPath, composePath, services...); err != nil {
-		return output, fmt.Errorf("сервисы запущены не в стабильном состоянии (%s): %w", strings.Join(services, ", "), err)
+		return output, fmt.Errorf("сервисы запущены не в стабильном состоянии (%s): %w\nВывод nerdctl compose:\n%s", strings.Join(services, ", "), err, strings.TrimSpace(output))
 	}
 	return output, nil
 }
@@ -708,23 +708,23 @@ func renderCloudflareConfig(domain, backendPrefix string, backend, frontend bool
 
 	var rendered bytes.Buffer
 	if err := configTemplate.Execute(&rendered, struct {
-		Domain            string
-		BackendPrefix     string
-		Backend           bool
-		Frontend          bool
-		BackendService    string
-		FrontendService   string
-		BackendPort       int
-		FrontendPort      int
+		Domain          string
+		BackendPrefix   string
+		Backend         bool
+		Frontend        bool
+		BackendService  string
+		FrontendService string
+		BackendPort     int
+		FrontendPort    int
 	}{
-		Domain:           domain,
-		BackendPrefix:    backendPrefix,
-		Backend:          backend,
-		Frontend:         frontend,
-		BackendService:   GetDeployServiceBackend(),
-		FrontendService:  GetDeployServiceFrontend(),
-		BackendPort:      GetDeployServiceBackendPort(),
-		FrontendPort:     GetDeployServiceFrontendPort(),
+		Domain:          domain,
+		BackendPrefix:   backendPrefix,
+		Backend:         backend,
+		Frontend:        frontend,
+		BackendService:  GetDeployServiceBackend(),
+		FrontendService: GetDeployServiceFrontend(),
+		BackendPort:     GetDeployServiceBackendPort(),
+		FrontendPort:    GetDeployServiceFrontendPort(),
 	}); err != nil {
 		return "", err
 	}

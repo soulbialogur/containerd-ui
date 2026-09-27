@@ -1,21 +1,37 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"fyne.io/fyne/v2/widget"
 )
+
+func setRefreshButtonLoading(button *widget.Button, label string, loading bool) {
+	if button == nil {
+		return
+	}
+	if loading {
+		button.SetText(i18n.T("dialogs.loading"))
+		button.Disable()
+		return
+	}
+	button.SetText(label)
+	button.Enable()
+}
 
 var economyMode atomic.Bool
 
 type tabActive struct {
-	mu      sync.Mutex
-	active  bool
-	period  time.Duration
-	ticker  *time.Ticker
-	done    chan struct{}
-	onTick  func()
+	mu     sync.Mutex
+	active bool
+	period time.Duration
+	ticker *time.Ticker
+	done   chan struct{}
+	onTick func()
 }
 
 func newTabActive(initialActive bool, period time.Duration, onTick func()) *tabActive {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -76,8 +77,15 @@ func (om *OperationManager) GetOperation(id string) *OperationProgress {
 
 func (om *OperationManager) SetOperation(id string, op *OperationProgress) {
 	om.mu.Lock()
-	defer om.mu.Unlock()
+	if current, ok := om.operations[id]; ok && current.Finished && !op.Finished {
+		om.mu.Unlock()
+		return
+	}
 	om.operations[id] = op
+	om.mu.Unlock()
+	if om.onUpdate != nil {
+		om.onUpdate()
+	}
 }
 
 func (om *OperationManager) RemoveOperation(id string) {
@@ -93,49 +101,54 @@ func (om *OperationManager) StartOperation(id string, opType OperationType) stri
 		Progress: 0.0,
 		Finished: false,
 	}
-	om.SetOperation(id, op)
+	om.mu.Lock()
+	om.operations[id] = op
+	om.mu.Unlock()
+	if om.onUpdate != nil {
+		om.onUpdate()
+	}
 	return id
 }
 
 func (om *OperationManager) UpdateOperation(id string, progress float32, status string) {
-	om.mu.RLock()
+	om.mu.Lock()
 	op, ok := om.operations[id]
-	om.mu.RUnlock()
 	if !ok {
+		om.mu.Unlock()
 		return
 	}
-	op.Progress = progress
-	op.Status = status
-	om.SetOperation(id, op)
+	updated := *op
+	updated.Progress = progress
+	updated.Status = status
+	om.operations[id] = &updated
+	om.mu.Unlock()
 	if om.onUpdate != nil {
 		om.onUpdate()
 	}
 }
 
 func (om *OperationManager) FinishOperation(id string, success bool, errMsg string) {
-	om.mu.RLock()
+	om.mu.Lock()
 	op, ok := om.operations[id]
-	om.mu.RUnlock()
 	if !ok {
+		om.mu.Unlock()
 		return
 	}
-	op.Progress = 1.0
-	op.Finished = true
-	op.FinishedAt = time.Now()
+	updated := *op
+	updated.Progress = 1.0
+	updated.Finished = true
+	updated.FinishedAt = time.Now()
 	if success {
-		op.Status = i18n.T("op.done")
+		updated.Status = i18n.T("op.done")
 	} else {
-		op.Status = i18n.T("op.error", errMsg)
-		op.Error = nil
+		updated.Status = i18n.T("op.error", errMsg)
+		updated.Error = fmt.Errorf("%s", errMsg)
 	}
-	om.SetOperation(id, op)
+	om.operations[id] = &updated
+	om.mu.Unlock()
 	if om.onUpdate != nil {
 		om.onUpdate()
 	}
-	go func() {
-		time.Sleep(30 * time.Second)
-		om.RemoveOperation(id)
-	}()
 }
 
 func (om *OperationManager) GetActiveOperations() []*OperationProgress {
@@ -149,6 +162,22 @@ func (om *OperationManager) GetActiveOperations() []*OperationProgress {
 		}
 	}
 	return active
+}
+
+func (om *OperationManager) GetLatestFinished() *OperationProgress {
+	om.mu.RLock()
+	defer om.mu.RUnlock()
+	var latest *OperationProgress
+	for _, op := range om.operations {
+		if !op.Finished {
+			continue
+		}
+		if latest == nil || op.FinishedAt.After(latest.FinishedAt) {
+			cp := *op
+			latest = &cp
+		}
+	}
+	return latest
 }
 
 func (om *OperationManager) CleanupFinished(maxAge time.Duration) {
@@ -214,10 +243,11 @@ func (pbc *ProgressBarComponent) SetCloseHandler(handler func()) {
 }
 
 func (pbc *ProgressBarComponent) Show(operationID string, opType OperationType) {
-	pbc.bar.Show()
 	pbc.bar.SetValue(0)
-	pbc.bar.Hide()
+	pbc.bar.Show()
+	pbc.label.SetText(i18n.T("op.in_progress"))
 	pbc.label.Show()
+	pbc.closeBtn.Hide()
 	if opType == OpBuild {
 		pbc.cancel.Show()
 	}
@@ -241,8 +271,12 @@ func (pbc *ProgressBarComponent) Update(progress *OperationProgress) {
 	if progress.Finished {
 		pbc.bar.SetValue(float64(progress.Progress))
 		pbc.bar.Hide()
-		pbc.label.Show()
-		pbc.label.SetText(progress.Status)
+		if progress.Error != nil {
+			pbc.label.SetText(progress.Status)
+			pbc.label.Show()
+		} else {
+			pbc.label.Hide()
+		}
 		pbc.closeBtn.Show()
 		pbc.cancel.Hide()
 		return
@@ -251,6 +285,7 @@ func (pbc *ProgressBarComponent) Update(progress *OperationProgress) {
 	pbc.bar.SetValue(float64(progress.Progress))
 	pbc.label.Show()
 	pbc.label.SetText(progress.Status)
+	pbc.closeBtn.Hide()
 	if progress.Type == OpBuild {
 		pbc.cancel.Show()
 	}

@@ -28,6 +28,22 @@
     "exited": "Stopped",
     "dead": "Dead"
   },
+  "build_phase": {
+    "preparing": "Preparing...",
+    "resolving_deps": "Resolving dependencies...",
+    "using_cache": "Using cache...",
+    "pulling": "Pulling images...",
+    "verifying": "Verifying integrity...",
+    "unpacking": "Unpacking layer...",
+    "compiling": "Compiling...",
+    "linking": "Linking...",
+    "optimizing": "Optimizing image...",
+    "saving": "Saving image...",
+    "success": "Success!",
+    "error": "Build error!",
+    "building": "Building...",
+    "cancelled": "Cancelled..."
+  },
   "tabs": {
     "status": "Status",
     "containers": "Containers",
@@ -92,6 +108,8 @@
     "detail_timeout": "Timeout/check error",
     "detail_unavailable": "Unavailable",
     "install_all_title": "Install All Components",
+    "install_all_checking": "Checking components...",
+    "install_all_done": "All components installed",
     "install_all_confirm_title": "Component Installation",
     "install_all_confirm_text": "Are you sure you want to install all components?\n\nThe following will be installed:\n• WSL2 + Debian\n• containerd\n• nerdctl\n• BuildKit\n\nThis will take a few minutes. Continue?",
     "install_all_success": "✅ Installation completed successfully!",
@@ -231,7 +249,9 @@
     "disk_available": "Available",
     "refresh": "Refresh"
   },
-  "logs": {
+    "logs": {
+      "startup": "Startup logs",
+      "live": "Live logs",
     "title": "Logs",
     "container": "Container:",
     "follow": "Follow",

@@ -51,8 +51,11 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 		go refreshDetails(selectedName)
 	}
 
+	var btnRefresh *widget.Button
 	refresh := func() {
 		go func() {
+			safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("networks.refresh"), true) })
+			defer safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("networks.refresh"), false) })
 			ctx, cancel := context.WithCancel(wsl.AppContext())
 			defer cancel()
 			data, err := wsl.ListNetworks(ctx)
@@ -110,7 +113,7 @@ func BuildNetworksTab(win fyne.Window) fyne.CanvasObject {
 		}, win)
 	})
 
-	btnRefresh := widget.NewButton(i18n.T("networks.refresh"), refresh)
+	btnRefresh = widget.NewButton(i18n.T("networks.refresh"), refresh)
 	topBar := container.NewAdaptiveGrid(3, btnCreate, btnRemove, btnRefresh)
 	refresh()
 

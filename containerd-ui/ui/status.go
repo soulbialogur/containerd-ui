@@ -44,13 +44,13 @@ func getSystemMetrics() map[string]string {
 	systemMetrics.RUnlock()
 
 	script := "" +
-		"echo 'CONTAINERS_TOTAL'; nerdctl ps -a --format '{{.ID}}' 2>/dev/null | wc -l; " +
-		"echo 'CONTAINERS_RUNNING'; nerdctl ps --format '{{.ID}}' 2>/dev/null | wc -l; " +
-		"echo 'IMAGES'; nerdctl images --format '{{.ID}}' 2>/dev/null | wc -l; " +
-		"echo 'VOLUMES'; nerdctl volume ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l; " +
-		"echo 'NETWORKS'; nerdctl network ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l"
+		"printf 'CONTAINERS_TOTAL;'; nerdctl ps -a --format '{{.ID}}' 2>/dev/null | wc -l; " +
+		"printf 'CONTAINERS_RUNNING;'; nerdctl ps --format '{{.ID}}' 2>/dev/null | wc -l; " +
+		"printf 'IMAGES;'; nerdctl images --format '{{.ID}}' 2>/dev/null | wc -l; " +
+		"printf 'VOLUMES;'; nerdctl volume ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l; " +
+		"printf 'NETWORKS;'; nerdctl network ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l"
 
-	out, err := runWSLWithTimeout(script, 15*time.Second)
+	out, err := wsl.RunWSLAsRootWithTimeout(script, 15*time.Second)
 	if err != nil {
 		result := map[string]string{
 			"containers_total": "—", "containers_running": "—",
@@ -69,20 +69,17 @@ func getSystemMetrics() map[string]string {
 	lines := strings.Split(out, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if idx := strings.Index(line, "; "); idx >= 0 {
-			continue
-		}
 		switch {
-		case strings.HasPrefix(line, "CONTAINERS_TOTAL; "):
-			result["containers_total"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_TOTAL; "))
-		case strings.HasPrefix(line, "CONTAINERS_RUNNING; "):
-			result["containers_running"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_RUNNING; "))
-		case strings.HasPrefix(line, "IMAGES; "):
-			result["images"] = strings.TrimSpace(strings.TrimPrefix(line, "IMAGES; "))
-		case strings.HasPrefix(line, "VOLUMES; "):
-			result["volumes"] = strings.TrimSpace(strings.TrimPrefix(line, "VOLUMES; "))
-		case strings.HasPrefix(line, "NETWORKS; "):
-			result["networks"] = strings.TrimSpace(strings.TrimPrefix(line, "NETWORKS; "))
+		case strings.HasPrefix(line, "CONTAINERS_TOTAL;"):
+			result["containers_total"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_TOTAL;"))
+		case strings.HasPrefix(line, "CONTAINERS_RUNNING;"):
+			result["containers_running"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_RUNNING;"))
+		case strings.HasPrefix(line, "IMAGES;"):
+			result["images"] = strings.TrimSpace(strings.TrimPrefix(line, "IMAGES;"))
+		case strings.HasPrefix(line, "VOLUMES;"):
+			result["volumes"] = strings.TrimSpace(strings.TrimPrefix(line, "VOLUMES;"))
+		case strings.HasPrefix(line, "NETWORKS;"):
+			result["networks"] = strings.TrimSpace(strings.TrimPrefix(line, "NETWORKS;"))
 		}
 	}
 
@@ -113,16 +110,30 @@ func getSystemMetrics() map[string]string {
 }
 
 type metricCard struct {
-	label   *widget.Label
-	title   string
-	icon    string
-	content string
+	label      *widget.Label
+	value      *widget.Button
+	title      string
+	icon       string
+	content    string
+	navigateTo string
 }
 
-func newMetricCard(title, icon string) *metricCard {
+var statusMetricNavigation func(string)
+
+func SetStatusMetricNavigation(navigate func(string)) {
+	statusMetricNavigation = navigate
+}
+
+func newMetricCard(title, icon, navigateTo string) *metricCard {
 	lbl := widget.NewLabel("—")
 	lbl.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
-	return &metricCard{label: lbl, title: title, icon: icon}
+	value := widget.NewButton("—", func() {
+		if statusMetricNavigation != nil {
+			statusMetricNavigation(navigateTo)
+		}
+	})
+	value.Importance = widget.LowImportance
+	return &metricCard{label: lbl, value: value, title: title, icon: icon, navigateTo: navigateTo}
 }
 
 func (mc *metricCard) widget() fyne.CanvasObject {
@@ -130,13 +141,24 @@ func (mc *metricCard) widget() fyne.CanvasObject {
 		nil, nil,
 		widget.NewLabelWithStyle(mc.title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		nil,
-		container.NewHBox(widget.NewLabel(mc.icon), mc.label),
+		container.NewHBox(widget.NewLabel(mc.icon), mc.value),
 	)
 }
 
 func (mc *metricCard) setValue(val string) {
 	mc.content = val
 	mc.label.SetText(val)
+	mc.value.SetText(val)
+}
+
+func (mc *metricCard) setLoading(loading bool) {
+	if loading {
+		mc.label.SetText("...")
+		mc.value.SetText("...")
+		return
+	}
+	mc.label.SetText(mc.content)
+	mc.value.SetText(mc.content)
 }
 
 type ComponentStatus struct {
@@ -180,13 +202,18 @@ func getAllComponentsStatus() []ComponentStatus {
 	statusCache.RUnlock()
 
 	svcName := wsl.GetSystemdService()
+	buildkitOK := wsl.CheckBuildkitd()
 	cmd := "" +
 		"echo 'WSL_CHECK_START'; " +
 		"uname -r 2>/dev/null | grep -qi microsoft && echo 'WSL:OK' || echo 'WSL:NO'; " +
 		"" + wsl.IsServiceActiveCommand(svcName) + " && echo 'CONTAINERD:OK' || echo 'CONTAINERD:NO'; " +
-		"buildctl --addr unix:///run/buildkit/buildkitd.sock debug workers > /dev/null 2>&1 && echo 'BUILDKIT:OK' || echo 'BUILDKIT:NO'; " +
 		"which nerdctl > /dev/null 2>&1 && echo 'NERDCTL:OK' || echo 'NERDCTL:NO'; " +
 		"echo 'WSL_CHECK_END'"
+	if buildkitOK {
+		cmd = "echo 'BUILDKIT:OK'; " + cmd
+	} else {
+		cmd = "echo 'BUILDKIT:NO'; " + cmd
+	}
 
 	out, err := runWSLWithTimeout(cmd, 15*time.Second)
 
@@ -326,29 +353,19 @@ func shortVersion(raw string) string {
 }
 
 func areAllComponentsInstalled() bool {
-	// Проверяем наличие бинарников в WSL, а не их статус
+	// Проверяем наличие бинарников в WSL, а не их статус.
+	// Важно: CNI-плагины также обязательны для корректной работы bridge/networks.
+	// На Debian/WSL2 настоящий путь — /usr/lib/cni/bridge, хотя часть систем
+	// может также использовать /opt/cni/bin/bridge или /usr/libexec/cni/bridge.
 	script := "" +
-		"command -v containerd >/dev/null 2>&1 && echo 'CD:OK' || echo 'CD:NO'; " +
-		"command -v nerdctl >/dev/null 2>&1 && echo 'NC:OK' || echo 'NC:NO'; " +
-		"command -v buildctl >/dev/null 2>&1 && echo 'BK:OK' || echo 'BK:NO'; " +
-		"wsl --version >/dev/null 2>&1 && echo 'WSL:OK' || echo 'WSL:NO'"
+		"command -v containerd >/dev/null 2>&1 && " +
+		"command -v nerdctl >/dev/null 2>&1 && " +
+		"command -v buildctl >/dev/null 2>&1 && " +
+		"(test -x /opt/cni/bin/bridge || test -x /usr/lib/cni/bridge || test -x /usr/libexec/cni/bridge) && " +
+		"echo ALL_OK"
 
 	out, err := runWSLWithTimeout(script, 10*time.Second)
-	if err != nil {
-		return false
-	}
-
-	installed := false
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, ":OK") {
-			installed = true
-		} else if strings.Contains(line, ":NO") {
-			return false
-		}
-	}
-	return installed
+	return err == nil && strings.Contains(out, "ALL_OK")
 }
 
 var installInProgress = false
@@ -359,12 +376,12 @@ func checkNetwork() bool {
 	// Пробуем пингануть Google DNS — быстро и надёжно
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
-	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), wsl.GetShell(), "-c", 
+
+	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), wsl.GetShell(), "-c",
 		"ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 && echo OK || echo FAIL")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.CombinedOutput()
-	
+
 	return err == nil && strings.Contains(string(out), "OK")
 }
 
@@ -373,7 +390,7 @@ func installAllComponents(win fyne.Window) {
 	if installInProgress {
 		return
 	}
-	
+
 	// Проверяем, установлены ли уже все компоненты
 	if areAllComponentsInstalled() {
 		dialog.ShowInformation(
@@ -383,17 +400,17 @@ func installAllComponents(win fyne.Window) {
 		)
 		return
 	}
-	
+
 	// Проверяем что уже есть, чтобы не устанавливать заново
 	wslInstalled := false
 	containersInstalled := false
-	
+
 	script := "" +
 		"wsl --version >/dev/null 2>&1 && echo 'WSL:OK' || echo 'WSL:NO'; " +
 		"command -v containerd >/dev/null 2>&1 && echo 'CD:OK' || echo 'CD:NO'; " +
 		"command -v nerdctl >/dev/null 2>&1 && echo 'NC:OK' || echo 'NC:NO'; " +
 		"command -v buildctl >/dev/null 2>&1 && echo 'BK:OK' || echo 'BK:NO'"
-	
+
 	out, _ := runWSLWithTimeout(script, 10*time.Second)
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "WSL:OK") {
@@ -403,7 +420,7 @@ func installAllComponents(win fyne.Window) {
 			containersInstalled = true
 		}
 	}
-	
+
 	// Показываем диалог подтверждения с информацией о том что будет установлено
 	confirmMsg := "Вы уверены, что хотите установить компоненты?\n\n"
 	if !wslInstalled {
@@ -417,7 +434,7 @@ func installAllComponents(win fyne.Window) {
 		confirmMsg += "• containerd, nerdctl, BuildKit — уже установлены ✓\n"
 	}
 	confirmMsg += "\nЭто займёт несколько минут. Продолжить?"
-	
+
 	dialog.ShowCustomConfirm(
 		i18n.T("status.install_all_confirm_title"),
 		i18n.T("dialogs.ok"),
@@ -465,7 +482,7 @@ func installAllComponents(win fyne.Window) {
 				defer func() {
 					installInProgress = false
 				}()
-				
+
 				var logs []string
 				wslSuccess := false
 				aptSuccess := false
@@ -478,11 +495,11 @@ func installAllComponents(win fyne.Window) {
 					// Быстрый таймаут для WSL установки
 					wslCtx, wslCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 					defer wslCancel()
-					
+
 					wslCmd := exec.CommandContext(wslCtx, "powershell.exe", "-Command", "wsl --install Debian")
 					wslCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 					wslOut, wslErr := wslCmd.CombinedOutput()
-					
+
 					if wslCtx.Err() == context.DeadlineExceeded {
 						logs = append(logs, "  ❌ Таймаут: WSL установка не отвечает более 2 минут")
 					} else if wslErr != nil {
@@ -507,7 +524,7 @@ func installAllComponents(win fyne.Window) {
 						logs = append(logs, "  ❌ Нет подключения к интернету\n\n"+
 							"Установка невозможна без доступа к репозиториям.\n"+
 							"Проверьте сетевое подключение и попробуйте снова.")
-						
+
 						fyne.Do(func() {
 							dlg.Hide()
 							dialog.ShowError(errors.New(logs[len(logs)-1]), win)
@@ -518,12 +535,12 @@ func installAllComponents(win fyne.Window) {
 					// Длинный таймаут для apt — но с возможностью отмены
 					aptCtx, aptCancel := context.WithCancel(cancelCtx)
 					defer aptCancel()
-					
+
 					installScript := "" +
-						"sudo apt update && " +
-						"sudo apt install -y containerd nerdctl buildkit && " +
-						"sudo systemctl enable --now containerd && " +
-						"sudo systemctl enable --now buildkit"
+						"sudo -n apt update && " +
+						"sudo -n apt install -y containerd nerdctl buildkit containernetworking-plugins && " +
+						"sudo -n systemctl enable --now containerd && " +
+						"sudo -n systemctl enable --now buildkit"
 
 					cmd := exec.CommandContext(aptCtx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), wsl.GetShell(), "-c", installScript)
 					cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
@@ -567,7 +584,7 @@ func installAllComponents(win fyne.Window) {
 
 				fyne.Do(func() {
 					dlg.Hide()
-					
+
 					// Проверяем, была ли отмена
 					if cancelCtx.Err() == context.Canceled {
 						// Отмена — не показываем ошибку
@@ -600,19 +617,34 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	nerdctlCard := newResponsiveStatusCard("Nerdctl")
 
 	metrics := map[string]*metricCard{
-		"containers_running": newMetricCard(i18n.T("status.metric_containers"), "📦"),
-		"images":             newMetricCard(i18n.T("status.metric_images"), "🖼️"),
-		"volumes":            newMetricCard(i18n.T("status.metric_volumes"), "💾"),
-		"networks":           newMetricCard(i18n.T("status.metric_networks"), "🌐"),
+		"containers_running": newMetricCard(i18n.T("status.metric_containers"), "📦", i18n.T("tabs.containers")),
+		"images":             newMetricCard(i18n.T("status.metric_images"), "🖼️", i18n.T("tabs.images")),
+		"volumes":            newMetricCard(i18n.T("status.metric_volumes"), "💾", i18n.T("tabs.volumes")),
+		"networks":           newMetricCard(i18n.T("status.metric_networks"), "🌐", i18n.T("tabs.networks")),
 	}
 
 	lastCheckLabel := widget.NewLabel(i18n.T("status.last_check_never"))
+	var btnRefresh *widget.Button
+	setLoading := func(loading bool) {
+		wslCard.SetLoading(loading)
+		containerdCard.SetLoading(loading)
+		buildkitdCard.SetLoading(loading)
+		nerdctlCard.SetLoading(loading)
+		for _, mc := range metrics {
+			mc.setLoading(loading)
+		}
+	}
 
 	updateUI := func() {
 		if !updateMu.TryLock() {
 			return
 		}
 		defer updateMu.Unlock()
+		safeUI(func() {
+			setLoading(true)
+			lastCheckLabel.SetText(i18n.T("status.loading"))
+			btnRefresh.Disable()
+		})
 
 		statusCache.Lock()
 		statusCache.timestamp = time.Time{}
@@ -624,6 +656,7 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 
 		// Все изменения Fyne-виджетов — только через fyne.Do.
 		safeUI(func() {
+				setLoading(false)
 			for _, cs := range statuses {
 				statusText := cs.Icon
 				if cs.Version != "" {
@@ -652,10 +685,11 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 				}
 			}
 			lastCheckLabel.SetText(i18n.T("status.last_check", time.Now().Format("15:04:05")))
+			btnRefresh.Enable()
 		})
 	}
 
-	btnRefresh := widget.NewButton(i18n.T("status.refresh"), func() { go updateUI() })
+	btnRefresh = widget.NewButton(i18n.T("status.refresh"), func() { go updateUI() })
 
 	tab := newTabActive(true, TickerAutoRefresh, func() {
 		updateUI()
@@ -666,45 +700,87 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	})
 	autoRefresh.Checked = true
 
-	btnStartBuildkitd := widget.NewButton(i18n.T("status.start_buildkitd"), func() {
+	var btnStartBuildkitd *widget.Button
+	var btnStopBuildkitd *widget.Button
+
+	btnStartBuildkitd = widget.NewButton(i18n.T("status.start_buildkitd"), func() {
+		btnStartBuildkitd.Disable()
+		btnStopBuildkitd.Disable()
+		buildkitdCard.SetStatus("⏳ Запуск Buildkitd...", "⏳ Запуск...")
+		lastCheckLabel.SetText("⏳ Запуск Buildkitd...")
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
+				safeUI(func() {
+					btnStartBuildkitd.Enable()
+					btnStopBuildkitd.Enable()
+				})
 				return
 			default:
 			}
 
 			if err := wsl.StartBuildkitd(); err != nil {
-				safeUI(func() { lastCheckLabel.SetText(i18n.T("common.error") + ": " + err.Error()) })
+				safeUI(func() {
+					buildkitdCard.SetStatus("❌ Ошибка запуска: "+err.Error(), "❌ Ошибка запуска")
+					lastCheckLabel.SetText(i18n.T("common.error") + ": " + err.Error())
+					btnStartBuildkitd.Enable()
+					btnStopBuildkitd.Enable()
+				})
+				// Ошибка не должна висеть вечно: через 15 секунд
+				// возвращаем штатную подпись.
+				time.AfterFunc(15*time.Second, func() {
+					safeUI(func() {
+						buildkitdCard.SetStatus("⚠️ Buildkitd остановлен", "⚠️ Остановлен")
+						lastCheckLabel.SetText(i18n.T("status.last_check", time.Now().Format("15:04:05")))
+					})
+				})
 			} else {
+				safeUI(func() {
+					buildkitdCard.SetStatus("✅ Buildkitd запущен", "✅ Активен")
+					btnStartBuildkitd.Enable()
+					btnStopBuildkitd.Enable()
+				})
 				updateUI()
 			}
 		}()
 	})
+	btnStartBuildkitd.Importance = widget.HighImportance
 
-	btnStopBuildkitd := widget.NewButton(i18n.T("status.stop_buildkitd"), func() {
+	btnStopBuildkitd = widget.NewButton(i18n.T("status.stop_buildkitd"), func() {
+		btnStartBuildkitd.Disable()
+		btnStopBuildkitd.Disable()
+		buildkitdCard.SetStatus("⏳ Остановка Buildkitd...", "⏳ Остановка...")
+		lastCheckLabel.SetText("⏳ Остановка Buildkitd...")
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
+				safeUI(func() {
+					btnStartBuildkitd.Enable()
+					btnStopBuildkitd.Enable()
+				})
 				return
 			default:
 			}
 
 			wsl.StopBuildkitd()
+			safeUI(func() {
+				buildkitdCard.SetStatus("⚠️ Buildkitd остановлен", "⚠️ Остановлен")
+				lastCheckLabel.SetText("Buildkitd остановлен")
+				btnStartBuildkitd.Enable()
+				btnStopBuildkitd.Enable()
+			})
 			updateUI()
 		}()
 	})
+	btnStopBuildkitd.Importance = widget.DangerImportance
 
 	// --- Ссылки на скачивание компонентов и кнопка установки ---
 	installBtn := widget.NewButton(i18n.T("status.install_all_title"), func() {
 		installAllComponents(win)
 	})
 	installBtn.Importance = widget.HighImportance
-	
-	// Если все компоненты уже установлены — делаем кнопку неактивной
-	if areAllComponentsInstalled() {
-		installBtn.Disable()
-	}
+	installBtn.SetText(i18n.T("status.install_all_checking"))
+	installBtn.Disable()
 
 	downloads := container.NewVBox(
 		container.NewHBox(
@@ -722,7 +798,19 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	registerTabNamed(i18n.T("tabs.status"), tab)
 
 	// Первичная проверка WSL запускается после построения UI.
-	go updateUI()
+	go func() {
+		updateUI()
+		installed := areAllComponentsInstalled()
+		safeUI(func() {
+			if installed {
+				installBtn.SetText(i18n.T("status.install_all_done"))
+				installBtn.Disable()
+				return
+			}
+			installBtn.SetText(i18n.T("status.install_all_title"))
+			installBtn.Enable()
+		})
+	}()
 
 	return withVerticalScroll(container.NewVBox(
 		container.NewHBox(btnRefresh, autoRefresh, layout.NewSpacer(), lastCheckLabel),

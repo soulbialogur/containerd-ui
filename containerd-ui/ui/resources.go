@@ -14,6 +14,7 @@ func BuildResourcesTab() fyne.CanvasObject {
 	var stats []wsl.ContainerStat
 	var mu sync.Mutex
 	var refreshLock sync.Mutex
+	var btnRefresh *widget.Button
 
 	lblRAM := widget.NewLabel(i18n.T("resources.ram", "—", "—", "—"))
 	lblCPU := widget.NewLabel(i18n.T("resources.cpu_info", "—", "—"))
@@ -76,12 +77,12 @@ func BuildResourcesTab() fyne.CanvasObject {
 		},
 	)
 
-	table.SetColumnWidth(0, 55)
-	table.SetColumnWidth(1, 100)
-	table.SetColumnWidth(2, 55)
-	table.SetColumnWidth(3, 90)
-	table.SetColumnWidth(4, 90)
-	table.SetColumnWidth(5, 55)
+	table.SetColumnWidth(0, 75)
+	table.SetColumnWidth(1, 95)
+	table.SetColumnWidth(2, 60)
+	table.SetColumnWidth(3, 145)
+	table.SetColumnWidth(4, 115)
+	table.SetColumnWidth(5, 75)
 
 	refresh := func() {
 		if !refreshLock.TryLock() {
@@ -90,6 +91,8 @@ func BuildResourcesTab() fyne.CanvasObject {
 		defer refreshLock.Unlock()
 
 		go func() {
+			safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("resources.refresh"), true) })
+			defer safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("resources.refresh"), false) })
 			var containerStats []wsl.ContainerStat
 			var sysRes *wsl.SystemResources
 
@@ -130,6 +133,12 @@ func BuildResourcesTab() fyne.CanvasObject {
 					lblCPU.SetText(i18n.T("resources.cpu_info", sysRes.CPUCores, sysRes.CPULoad))
 					lblDisk.SetText(i18n.T("resources.disk_info", sysRes.DiskUsed, sysRes.DiskTotal, sysRes.DiskFree))
 				})
+			} else {
+				safeUI(func() {
+					lblRAM.SetText(i18n.T("resources.ram", "—", "—", "—"))
+					lblCPU.SetText(i18n.T("resources.cpu_info", "—", "—"))
+					lblDisk.SetText(i18n.T("resources.disk_info", "—", "—", "—"))
+				})
 			}
 
 			mu.Lock()
@@ -143,6 +152,7 @@ func BuildResourcesTab() fyne.CanvasObject {
 			})
 		}()
 	}
+	btnRefresh = widget.NewButton(i18n.T("resources.refresh"), refresh)
 
 	resourceCards := container.NewVBox(
 		container.NewBorder(nil, nil, nil, widget.NewLabelWithStyle(i18n.T("resources.title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -162,6 +172,7 @@ func BuildResourcesTab() fyne.CanvasObject {
 			),
 		),
 		widget.NewSeparator(),
+		container.NewHBox(btnRefresh),
 	)
 
 	topBar := container.NewBorder(

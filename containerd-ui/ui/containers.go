@@ -4,11 +4,11 @@ import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
-	"errors"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -153,8 +153,13 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 	opManager := NewOperationManager()
 
 	opManager.SetOnUpdate(func() {
-		ops := opManager.GetActiveOperations()
 		safeUI(func() {
+			ops := opManager.GetActiveOperations()
+			if len(ops) == 0 {
+				if latest := opManager.GetLatestFinished(); latest != nil && latest.Error != nil {
+					ops = []*OperationProgress{latest}
+				}
+			}
 			if len(ops) > 0 {
 				progressBar.Update(ops[0])
 			} else {
@@ -183,7 +188,11 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 			}
 			grid := object.(*fyne.Container)
 			labels := grid.Objects
-			values := []string{row.ID, row.Name, row.Image, wsl.TranslateStatus(row.Status), row.Ports}
+			imageName := row.Image
+			if slash := strings.LastIndex(imageName, "/"); slash >= 0 && slash+1 < len(imageName) {
+				imageName = imageName[slash+1:]
+			}
+			values := []string{row.ID, row.Name, imageName, wsl.TranslateStatus(row.Status), row.Ports}
 			for i, value := range values {
 				label := labels[i].(*widget.Label)
 				if i == 1 && value == "" {
@@ -207,30 +216,32 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 	)
 
 	var refreshTimer *time.Timer
-	var lastRefresh time.Time
+	var btnRefresh *widget.Button
 	refresh := func() {
-		if time.Since(lastRefresh) < 3*time.Second {
-			return
-		}
-		lastRefresh = time.Now()
 		if refreshTimer != nil {
 			refreshTimer.Stop()
 		}
-		refreshTimer = time.AfterFunc(750*time.Millisecond, func() {
+		refreshTimer = time.AfterFunc(100*time.Millisecond, func() {
 			go func() {
+				safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("containers.refresh"), true) })
+				defer safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("containers.refresh"), false) })
 				select {
 				case <-wsl.AppContext().Done():
 					return
 				default:
 				}
-				data.clear()
+				wsl.CDInvalidateContainersCache()
 				containers, err := wsl.ListContainers(true)
-				if err == nil {
-					data.setRows(containers)
+				if err != nil {
 					safeUI(func() {
-						containerList.Refresh()
+						showErrorDialog(win, fmt.Sprintf("Не удалось обновить список контейнеров: %v", err))
 					})
+					return
 				}
+				data.setRows(containers)
+				safeUI(func() {
+					containerList.Refresh()
+				})
 			}()
 		})
 	}
@@ -294,9 +305,6 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 								currentOp.Progress = 0.95
 							}
 							opManager.SetOperation(opID, currentOp)
-							safeUI(func() {
-								progressBar.Update(currentOp)
-							})
 						}
 					case <-cancelCh:
 						return
@@ -312,7 +320,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				opManager.FinishOperation(opID, false, err.Error())
 			} else {
 				currentOp := opManager.GetOperation(opID)
-			if currentOp != nil {
+				if currentOp != nil {
 					currentOp.Progress = 1.0
 					currentOp.Status = i18n.T("op.done")
 					opManager.SetOperation(opID, currentOp)
@@ -340,6 +348,24 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 	makeBtn := func(text string, tapped func()) fyne.CanvasObject {
 		return widget.NewButton(text, tapped)
 	}
+	showRemoveConfirm := func(title, message string, onConfirm func()) {
+		confirmDialog := dialog.NewCustomConfirm(
+			title,
+			i18n.T("dialogs.ok"),
+			i18n.T("dialogs.cancel"),
+			widget.NewLabel(message),
+			func(ok bool) {
+				if ok {
+					onConfirm()
+				}
+			},
+			win,
+		)
+		confirmDialog.Resize(fyne.NewSize(420, 180))
+		confirmDialog.Show()
+	}
+
+	btnRefresh = widget.NewButton(i18n.T("containers.refresh"), refresh)
 
 	topBar := container.NewBorder(
 		progressBar.Widget(),
@@ -394,61 +420,46 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				}
 			}),
 			makeBtn(i18n.T("containers.restart"), func() {
-				if selectedID != "" {
-					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-						progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_stop"))
-						time.Sleep(SleepOperation)
-						err := wsl.StopContainer(selectedID)
-						if err != nil {
-							return err
-						}
-						progress.UpdateOperation(selectedID, 0.5, i18n.T("containers.progress_start"))
-						time.Sleep(SleepOperation)
-						return wsl.StartContainer(selectedID)
-					}, OpRestart)
+				if selectedID == "" {
+					showErrorDialog(win, "Сначала выберите контейнер для перезапуска")
+					return
 				}
+				asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
+					progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_stop"))
+					time.Sleep(SleepOperation)
+					err := wsl.StopContainer(selectedID)
+					if err != nil {
+						return fmt.Errorf("остановка контейнера %s: %w", selectedID, err)
+					}
+					progress.UpdateOperation(selectedID, 0.5, i18n.T("containers.progress_start"))
+					time.Sleep(SleepOperation)
+					if err := wsl.StartContainer(selectedID); err != nil {
+						return fmt.Errorf("запуск контейнера %s: %w", selectedID, err)
+					}
+					return nil
+				}, OpRestart)
 			}),
 			makeBtn(i18n.T("containers.remove"), func() {
 				if selectedID != "" {
-					dialog.ShowConfirm(i18n.T("containers.remove_title"), i18n.T("containers.confirm_remove", selectedID), func(ok bool) {
-						if ok {
-							asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-								_, err := wsl.RunWSL("nerdctl kill " + wsl.ShellQuote(selectedID) + " 2>/dev/null; echo 'kill_done'")
-								if err != nil {
-									progress.UpdateOperation(selectedID, 0.2, i18n.T("containers.progress_kill_warn"))
-								}
-								progress.UpdateOperation(selectedID, 0.6, i18n.T("containers.progress_remove"))
-								return wsl.RemoveContainer(selectedID)
-							}, OpRemove)
-						}
-					}, win)
+					showRemoveConfirm(i18n.T("containers.remove_title"), i18n.T("containers.confirm_remove", selectedID), func() {
+						asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
+							progress.UpdateOperation(selectedID, 0.4, i18n.T("containers.progress_remove"))
+							return wsl.RemoveContainer(selectedID)
+						}, OpRemove)
+					})
 				} else {
-					dialog.ShowConfirm(i18n.T("containers.remove_all_title"), i18n.T("containers.confirm_remove_all"), func(ok bool) {
-						if ok {
-							asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-								containers, err := wsl.ListContainers(true)
-								if err != nil {
-									return err
-								}
-								if len(containers) == 0 {
-									return nil
-								}
-								var ids []string
-								for _, c := range containers {
-									ids = append(ids, c.ID)
-								}
-								var quotedIDs []string
-								for _, id := range ids {
-									quotedIDs = append(quotedIDs, wsl.ShellQuote(id))
-								}
-								killCmd := "nerdctl kill " + strings.Join(quotedIDs, " ") + " 2>/dev/null"
-								_, _ = wsl.RunWSL(killCmd)
-								rmCmd := "nerdctl rm -f " + strings.Join(quotedIDs, " ") + " 2>/dev/null"
-								_, _ = wsl.RunWSL(rmCmd)
+					showRemoveConfirm(i18n.T("containers.remove_all_title"), i18n.T("containers.confirm_remove_all"), func() {
+						asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
+							containers, err := wsl.ListContainers(true)
+							if err != nil {
+								return err
+							}
+							if len(containers) == 0 {
 								return nil
-							}, OpRemove)
-						}
-					}, win)
+							}
+							return runContainerOperations(containers, cancelCh, wsl.RemoveContainer)
+						}, OpRemove)
+					})
 				}
 			}),
 			makeBtn(i18n.T("containers.build"), func() {
@@ -500,14 +511,52 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 							})
 
 							opID := opManager.StartOperation("build", OpBuild)
+							// Сбрасываем трекер фаз ровно один раз — в начале
+							// сборки. Внутри DetectBuildPhase сброса больше нет,
+							// иначе phaseStartTime прыгает и прогресс откатывается.
+							wsl.ResetBuildProgress()
+
+							// Реальный прогресс: строки вывода сборки анализируются
+							// по мере их появления (wsl стримит их в onLine), фазы
+							// и проценты определяются по ним, а не по таймеру.
+							var outMu sync.Mutex
+							var outTail []string
+							lastPhaseUpdate := time.Now()
+
+							onLine := func(line string) {
+								outMu.Lock()
+								outTail = append(outTail, line)
+								if len(outTail) > 200 {
+									outTail = outTail[len(outTail)-200:]
+								}
+								recent := strings.Join(outTail, "\n")
+								outMu.Unlock()
+
+								if time.Since(lastPhaseUpdate) < 500*time.Millisecond {
+									return
+								}
+								lastPhaseUpdate = time.Now()
+
+								phase := wsl.DetectBuildPhase(recent)
+								currentOp := opManager.GetOperation(opID)
+								if currentOp == nil || currentOp.Finished {
+									return
+								}
+								if phase.Progress > currentOp.Progress {
+									currentOp.Progress = phase.Progress
+								}
+								if currentOp.Progress > 0.95 {
+									currentOp.Progress = 0.95
+								}
+								currentOp.Status = wsl.FormatBuildStatus(phase)
+								opManager.SetOperation(opID, currentOp)
+							}
 
 							var err error
 							var out string
-							if buildMode {
-								out, err = wsl.BuildAndRunProject(ctx)
-							} else {
-								out, err = wsl.RunProject(ctx)
-							}
+							out, err = runBuildWithPasswordRetry(win, ctx, onLine, buildMode, func(text string) {
+								onLine("#1 [internal] " + text)
+							})
 
 							if out != "" {
 								lines := strings.Split(out, "\n")
@@ -523,9 +572,18 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 							}
 
 							if err != nil {
-								opManager.FinishOperation(opID, false, err.Error())
+								errorText := err.Error()
+								if cleanedOutput := strings.TrimSpace(wsl.CleanWSLUserOutput(out)); cleanedOutput != "" &&
+									!strings.Contains(errorText, cleanedOutput) {
+									outputLines := strings.Split(cleanedOutput, "\n")
+									if len(outputLines) > 30 {
+										outputLines = outputLines[len(outputLines)-30:]
+									}
+									errorText += "\n\nВывод сборки (последние строки):\n" + strings.Join(outputLines, "\n")
+								}
+								opManager.FinishOperation(opID, false, errorText)
 								safeUI(func() {
-									showErrorDialog(win, err.Error())
+									showErrorDialog(win, errorText)
 								})
 							} else {
 								currentOp := opManager.GetOperation(opID)
@@ -655,7 +713,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					}, win)
 				})
 			}),
-			makeBtn(i18n.T("containers.refresh"), refresh),
+			btnRefresh,
 		),
 	)
 
@@ -683,4 +741,66 @@ func showErrorDialog(win fyne.Window, errMsg string) {
 	)
 	dlg.Resize(fyne.NewSize(650, 450))
 	dlg.Show()
+}
+
+// promptSudoPassword показывает модальный диалог ввода пароля sudo и
+// блокирующе ожидает результат (вызывается из фоновой goroutine сборки).
+// Возвращает ok=false, если пользователь отменил.
+func promptSudoPassword(win fyne.Window, title, detail string) (string, bool) {
+	type result struct {
+		password string
+		ok       bool
+	}
+	ch := make(chan result, 1)
+
+	safeUI(func() {
+		entry := widget.NewEntry()
+		entry.Password = true
+		entry.SetPlaceHolder("Пароль sudo для " + wsl.GetWslDistro())
+
+		content := container.NewVBox(
+			widget.NewLabel(detail),
+			entry,
+		)
+
+		dialog.NewCustomConfirm(
+			title,
+			i18n.T("dialogs.ok"),
+			i18n.T("dialogs.cancel"),
+			content,
+			func(confirmed bool) {
+				if confirmed && entry.Text != "" {
+					ch <- result{password: entry.Text, ok: true}
+				} else {
+					ch <- result{ok: false}
+				}
+			},
+			win,
+		).Show()
+	})
+
+	select {
+	case r := <-ch:
+		return r.password, r.ok
+	case <-time.After(5 * time.Minute):
+		// Диалог «проглочен» — считаем отменой, чтобы goroutine сборки
+		// не зависла навсегда.
+		return "", false
+	}
+}
+
+func runBuildWithPasswordRetry(
+	win fyne.Window,
+	ctx context.Context,
+	onLine func(string),
+	buildMode bool,
+	notify func(string),
+) (string, error) {
+	_ = win
+	_ = notify
+	wsl.ResetBuildProgress()
+	if buildMode {
+		return wsl.BuildAndRunProject(ctx, onLine)
+	}
+	return wsl.RunProject(ctx, onLine)
 }

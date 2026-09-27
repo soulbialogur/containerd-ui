@@ -62,37 +62,46 @@ func main() {
 		win.SetIcon(icon)
 	}
 
-	// StatusTab выполняет WSL-запросы при построении. Не создаём его до
-	// запуска event loop, иначе зависший WSL может задержать появление окна.
-	statusPlaceholder := container.NewCenter(widget.NewLabel("Загрузка статуса WSL..."))
-	statusTabItem := container.NewTabItem(i18n.T("tabs.status"), statusPlaceholder)
-
-	containersTab := ui.BuildContainersTab(win)
-	imagesTab := ui.BuildImagesTab(win)
-	volumesTab := ui.BuildVolumesTab(win)
-	networksTab := ui.BuildNetworksTab(win)
-	resourcesTab := ui.BuildResourcesTab()
-	logsTab := ui.BuildLogsTab(win)
-	databaseTab := ui.BuildDatabaseTab()
-	cleanTab := ui.BuildCleanTab()
-	deployTab := ui.BuildDeployTab(win)
-	settingsTab := ui.BuildSettingsTab(win)
+	// Тяжёлые вкладки создаются после появления окна. Это не блокирует холодный
+	// старт ожиданием WSL и позволяет показывать интерфейс сразу.
+	newPlaceholder := func() fyne.CanvasObject {
+		return container.NewCenter(widget.NewLabel("Загрузка..."))
+	}
+	statusTabItem := container.NewTabItem(i18n.T("tabs.status"), newPlaceholder())
+	containersTabItem := container.NewTabItem(i18n.T("tabs.containers"), newPlaceholder())
+	imagesTabItem := container.NewTabItem(i18n.T("tabs.images"), newPlaceholder())
+	volumesTabItem := container.NewTabItem(i18n.T("tabs.volumes"), newPlaceholder())
+	networksTabItem := container.NewTabItem(i18n.T("tabs.networks"), newPlaceholder())
+	resourcesTabItem := container.NewTabItem(i18n.T("tabs.resources"), newPlaceholder())
+	logsTabItem := container.NewTabItem(i18n.T("tabs.logs"), newPlaceholder())
+	databaseTabItem := container.NewTabItem(i18n.T("tabs.database"), newPlaceholder())
+	cleanTabItem := container.NewTabItem(i18n.T("tabs.clean"), newPlaceholder())
+	deployTabItem := container.NewTabItem(i18n.T("tabs.deploy"), newPlaceholder())
+	settingsTabItem := container.NewTabItem(i18n.T("tabs.settings"), newPlaceholder())
 
 	tabs := container.NewAppTabs(
 		statusTabItem,
-		container.NewTabItem(i18n.T("tabs.containers"), containersTab),
-		container.NewTabItem(i18n.T("tabs.images"), imagesTab),
-		container.NewTabItem(i18n.T("tabs.volumes"), volumesTab),
-		container.NewTabItem(i18n.T("tabs.networks"), networksTab),
-		container.NewTabItem(i18n.T("tabs.resources"), resourcesTab),
-		container.NewTabItem(i18n.T("tabs.logs"), logsTab),
-		container.NewTabItem(i18n.T("tabs.database"), databaseTab),
-		container.NewTabItem(i18n.T("tabs.clean"), cleanTab),
-		container.NewTabItem(i18n.T("tabs.deploy"), deployTab),
-		container.NewTabItem(i18n.T("tabs.settings"), settingsTab),
+		containersTabItem,
+		imagesTabItem,
+		volumesTabItem,
+		networksTabItem,
+		resourcesTabItem,
+		logsTabItem,
+		databaseTabItem,
+		cleanTabItem,
+		deployTabItem,
+		settingsTabItem,
 	)
 
 	tabs.SetTabLocation(container.TabLocationTop)
+	ui.SetStatusMetricNavigation(func(tabName string) {
+		for _, item := range tabs.Items {
+			if item.Text == tabName {
+				tabs.Select(item)
+				return
+			}
+		}
+	})
 
 	tabs.OnSelected = func(item *container.TabItem) {
 		ui.DeactivateAllTabs()
@@ -108,15 +117,27 @@ func main() {
 
 	win.SetContent(tabs)
 
-	// Все потенциально блокирующие WSL-проверки выполняются после того, как
-	// окно уже может быть показано пользователю.
+	// Вкладки создаются по одной после появления окна. Последовательность
+	// снижает конкуренцию за WSL при холодном запуске.
 	go func() {
-		// BuildStatusTab больше не выполняет WSL-запрос синхронно.
-		statusTab := ui.BuildStatusTab(win)
-		fyne.Do(func() {
-			statusTabItem.Content = statusTab
-			tabs.Refresh()
-		})
+		loadTab := func(item *container.TabItem, build func() fyne.CanvasObject) {
+			content := build()
+			fyne.Do(func() {
+				item.Content = content
+				tabs.Refresh()
+			})
+		}
+		loadTab(statusTabItem, func() fyne.CanvasObject { return ui.BuildStatusTab(win) })
+		loadTab(containersTabItem, func() fyne.CanvasObject { return ui.BuildContainersTab(win) })
+		loadTab(imagesTabItem, func() fyne.CanvasObject { return ui.BuildImagesTab(win) })
+		loadTab(volumesTabItem, func() fyne.CanvasObject { return ui.BuildVolumesTab(win) })
+		loadTab(networksTabItem, func() fyne.CanvasObject { return ui.BuildNetworksTab(win) })
+		loadTab(resourcesTabItem, func() fyne.CanvasObject { return ui.BuildResourcesTab() })
+		loadTab(logsTabItem, func() fyne.CanvasObject { return ui.BuildLogsTab(win) })
+		loadTab(databaseTabItem, func() fyne.CanvasObject { return ui.BuildDatabaseTab() })
+		loadTab(cleanTabItem, func() fyne.CanvasObject { return ui.BuildCleanTab() })
+		loadTab(deployTabItem, func() fyne.CanvasObject { return ui.BuildDeployTab(win) })
+		loadTab(settingsTabItem, func() fyne.CanvasObject { return ui.BuildSettingsTab(win) })
 	}()
 
 	win.ShowAndRun()

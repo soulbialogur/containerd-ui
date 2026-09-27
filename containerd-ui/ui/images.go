@@ -3,6 +3,7 @@ package ui
 import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -14,46 +15,52 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 	var images []wsl.Image
 	selectedID := ""
 
-	table := widget.NewTable(
-		func() (int, int) { return len(images) + 1, 5 },
-		func() fyne.CanvasObject {
-			return widget.NewLabel("Wide Header Space Text Here")
-		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
-			label := o.(*widget.Label)
+	newImageRow := func() fyne.CanvasObject {
+		labels := make([]fyne.CanvasObject, 5)
+		for i := range labels {
+			label := widget.NewLabel("")
 			label.Wrapping = fyne.TextTruncate
+			labels[i] = label
+		}
+		return container.NewGridWithColumns(5, labels...)
+	}
 
-			if i.Row == 0 {
-				headers := []string{i18n.T("images.id"), i18n.T("images.repository"), i18n.T("images.tag"), i18n.T("images.size"), i18n.T("images.created")}
-				label.SetText(headers[i.Col])
-				label.TextStyle = fyne.TextStyle{Bold: true}
+	imageList := widget.NewList(
+		func() int { return len(images) },
+		newImageRow,
+		func(id widget.ListItemID, o fyne.CanvasObject) {
+			if id < 0 || id >= len(images) {
 				return
 			}
-
-			img := images[i.Row-1]
-			switch i.Col {
-			case 0:
-				label.SetText(img.ID)
-			case 1:
-				repo := img.Repository
-				if len(repo) > 35 {
-					repo = repo[:32] + "..."
-				}
-				label.SetText(repo)
-			case 2:
-				label.SetText(img.Tag)
-			case 3:
-				label.SetText(img.Size)
-			case 4:
-				label.SetText(wsl.FormatDateShort(img.CreatedAt))
+			labels := o.(*fyne.Container).Objects
+			img := images[id]
+			repo := img.Repository
+			if slash := strings.LastIndex(repo, "/"); slash >= 0 && slash+1 < len(repo) {
+				repo = repo[slash+1:]
+			}
+			if len(repo) > 35 {
+				repo = repo[:32] + "..."
+			}
+			values := []string{img.ID, repo, img.Tag, img.Size, wsl.FormatDateShort(img.CreatedAt)}
+			for i, value := range values {
+				labels[i].(*widget.Label).SetText(value)
 			}
 		},
 	)
 
-	responsiveTable := newResponsiveTable(table, []float32{55, 110, 55, 70, 85})
+	header := container.NewGridWithColumns(5,
+		widget.NewLabelWithStyle(i18n.T("images.id"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("images.repository"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("images.tag"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("images.size"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("images.created"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	)
+	var btnRefresh *widget.Button
 
 	refresh := func() {
 		go func() {
+			safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("images.refresh"), true) })
+			defer safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("images.refresh"), false) })
 			select {
 			case <-wsl.AppContext().Done():
 				return
@@ -64,47 +71,62 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 			if err == nil {
 				images = data
 				safeUI(func() {
-					table.Refresh()
+					imageList.Refresh()
 				})
 			}
 		}()
 	}
 
-	table.OnSelected = func(id widget.TableCellID) {
-		if id.Row > 0 && id.Row-1 < len(images) {
-			selectedID = images[id.Row-1].ID
+	imageList.OnSelected = func(id widget.ListItemID) {
+		if id >= 0 && id < len(images) {
+			selectedID = images[id].ID
 		}
 	}
 
 	btnRemove := widget.NewButton(i18n.T("images.remove"), func() {
 		if selectedID != "" {
-			dialog.ShowConfirm(i18n.T("images.remove"), i18n.T("images.confirm_remove", selectedID), func(ok bool) {
-				if ok {
-					go func() {
-						select {
-						case <-wsl.AppContext().Done():
-							return
-						default:
-						}
+			confirmDialog := dialog.NewCustomConfirm(
+				i18n.T("images.remove"),
+				i18n.T("dialogs.ok"),
+				i18n.T("dialogs.cancel"),
+				widget.NewLabel(i18n.T("images.confirm_remove", selectedID)),
+				func(ok bool) {
+					if ok {
+						go func() {
+							select {
+							case <-wsl.AppContext().Done():
+								return
+							default:
+							}
 
-						wsl.RemoveImage(selectedID)
-						wsl.ClearImageSizeCache()
-						data, err := wsl.ListImages()
-						if err == nil {
-							images = data
-							safeUI(func() {
-								table.Refresh()
-							})
-						}
-					}()
-				}
-			}, win)
+							removeErr := wsl.RemoveImage(selectedID)
+							wsl.ClearImageSizeCache()
+							if removeErr != nil {
+								safeUI(func() {
+									dialog.ShowError(removeErr, win)
+								})
+								return
+							}
+							data, err := wsl.ListImages()
+							if err == nil {
+								images = data
+								safeUI(func() {
+									imageList.Refresh()
+								})
+							}
+						}()
+					}
+				},
+				win,
+			)
+			confirmDialog.Resize(fyne.NewSize(420, 180))
+			confirmDialog.Show()
 		}
 	})
-	btnRefresh := widget.NewButton(i18n.T("images.refresh"), refresh)
+	btnRefresh = widget.NewButton(i18n.T("images.refresh"), refresh)
 
 	topBar := container.NewHBox(btnRemove, btnRefresh)
 	refresh()
 
-	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, responsiveTable))
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, container.NewBorder(header, nil, nil, nil, imageList)))
 }

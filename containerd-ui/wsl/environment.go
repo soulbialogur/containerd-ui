@@ -161,6 +161,19 @@ func PrivilegePrefix() string {
 	return priv + " "
 }
 
+func PrivilegePrefixNonInteractive() string {
+	priv := CurrentEnvironment().PrivilegeCmd
+	switch priv {
+	case PrivSudo:
+		return "sudo -n "
+	case PrivDoas:
+		return "doas -n "
+	default:
+		return ""
+	}
+}
+
+
 // PrivilegeWrap оборачивает команду в повышение привилегий, если оно доступно.
 func PrivilegeWrap(command string) string {
 	prefix := PrivilegePrefix()

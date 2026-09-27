@@ -35,6 +35,15 @@ func (card *responsiveStatusCard) SetStatus(fullText, compactText string) {
 	card.updateText()
 }
 
+func (card *responsiveStatusCard) SetLoading(loading bool) {
+	if loading {
+		card.label.SetText("...")
+		card.label.Refresh()
+		return
+	}
+	card.updateText()
+}
+
 func (card *responsiveStatusCard) updateText() {
 	text := card.fullText
 	if card.compact {

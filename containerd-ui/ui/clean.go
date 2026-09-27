@@ -1,9 +1,10 @@
 package ui
 
 import (
-	"context"
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"context"
+	"fmt"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -19,9 +20,12 @@ func BuildCleanTab() fyne.CanvasObject {
 	resultScroll := container.NewScroll(lblResult)
 	resultScroll.SetMinSize(fyne.NewSize(0, 200))
 
+	var formatCleanupError func(string, error) string
+
 	formatCacheResult := func(result string, err error) string {
+		result = wsl.CleanCleanupOutput(result)
 		if err != nil {
-			return i18n.T("common.error") + "\n\n" + err.Error()
+			return formatCleanupError("кэш и dangling-образы", fmt.Errorf("%s\n%s", err.Error(), result))
 		}
 
 		lines := make([]string, 0)
@@ -38,6 +42,33 @@ func BuildCleanTab() fyne.CanvasObject {
 		return i18n.T("clean.cleaned") + "\n\n" +
 			i18n.T("clean.cache") + "\n" +
 			strings.Join(lines, "\n")
+	}
+
+	formatCleanupError = func(operation string, err error) string {
+		message := strings.ToLower(wsl.CleanCleanupOutput(err.Error()))
+		switch {
+		case strings.Contains(message, "buildkit is not running"), strings.Contains(message, "no buildkit host"), strings.Contains(message, "buildkitd не запущен"), strings.Contains(message, "buildctl needs to be installed"), strings.Contains(message, "buildkitd.sock"):
+			return "⚠️ " + operation + ": BuildKit не запущен, очистка пропущена"
+		case strings.Contains(message, "failed to ping to host"):
+			return "⚠️ " + operation + ": сервис containerd недоступен"
+		default:
+			return i18n.T("common.error") + "\n\n" + wsl.CleanCleanupOutput(err.Error())
+		}
+	}
+
+	formatCleanupResult := func(operation, result string, err error) string {
+		if err != nil {
+			return formatCleanupError(operation, err)
+		}
+		cleaned := wsl.CleanCleanupOutput(result)
+		lower := strings.ToLower(cleaned)
+		if cleaned == "" || strings.Contains(lower, "не найдены") || strings.Contains(lower, "нечего") {
+			return "✅ " + operation + ": нечего удалять"
+		}
+		if strings.Contains(lower, "не удалось удалить сеть") {
+			return "ℹ️ " + operation + ": сеть используется контейнерами"
+		}
+		return "✅ " + operation + " завершено"
 	}
 
 	btnCache := widget.NewButton(i18n.T("clean.cache"), nil)
@@ -99,9 +130,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanUnusedVolumes(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(i18n.T("common.error") + ": " + err.Error())
+					lblResult.SetText(formatCleanupResult("Неиспользуемые тома", res, err))
 				} else {
-					lblResult.SetText(i18n.T("clean.cleaned") + ":\n" + res)
+					lblResult.SetText(formatCleanupResult("Неиспользуемые тома", res, nil))
 				}
 				btnVolumes.Enable()
 				btnVolumes.Refresh()
@@ -137,9 +168,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanUnusedNetworks(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(i18n.T("common.error") + ": " + err.Error())
+					lblResult.SetText(formatCleanupResult("Неиспользуемые сети", res, err))
 				} else {
-					lblResult.SetText(i18n.T("clean.cleaned") + ":\n" + res)
+					lblResult.SetText(formatCleanupResult("Неиспользуемые сети", res, nil))
 				}
 				btnNetworks.Enable()
 				btnNetworks.Refresh()
@@ -175,9 +206,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanUntaggedImages(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(i18n.T("common.error") + ": " + err.Error())
+					lblResult.SetText(formatCleanupResult("Образы без тегов", res, err))
 				} else {
-					lblResult.SetText(i18n.T("clean.cleaned") + ":\n" + res)
+					lblResult.SetText(formatCleanupResult("Образы без тегов", res, nil))
 				}
 				btnImages.Enable()
 				btnImages.Refresh()
@@ -213,9 +244,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanBuildkitCache(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(i18n.T("common.error") + ": " + err.Error())
+					lblResult.SetText(formatCleanupResult("Кэш BuildKit", res, err))
 				} else {
-					lblResult.SetText(i18n.T("clean.cleaned") + ":\n" + res)
+					lblResult.SetText(formatCleanupResult("Кэш BuildKit", res, nil))
 				}
 				btnBuildkit.Enable()
 				btnBuildkit.Refresh()
@@ -252,19 +283,22 @@ func BuildCleanTab() fyne.CanvasObject {
 			var results []string
 
 			if res, err := wsl.CleanNerdctlCache(); err == nil {
-				results = append(results, i18n.T("clean.cache")+": "+res)
+				results = append(results, i18n.T("clean.cache")+": "+wsl.CleanCleanupOutput(res))
+			}
+			if res, err := wsl.CleanContainerdLogs(); err == nil {
+				results = append(results, "Логи: "+wsl.CleanCleanupOutput(res))
 			}
 			if res, err := wsl.CleanUnusedVolumes(ctx); err == nil {
-				results = append(results, i18n.T("clean.volumes")+": "+res)
+				results = append(results, i18n.T("clean.volumes")+": "+wsl.CleanCleanupOutput(res))
 			}
 			if res, err := wsl.CleanUnusedNetworks(ctx); err == nil {
-				results = append(results, i18n.T("clean.networks")+": "+res)
+				results = append(results, i18n.T("clean.networks")+": "+wsl.CleanCleanupOutput(res))
 			}
 			if res, err := wsl.CleanUntaggedImages(ctx); err == nil {
-				results = append(results, i18n.T("clean.images")+": "+res)
+				results = append(results, i18n.T("clean.images")+": "+wsl.CleanCleanupOutput(res))
 			}
 			if res, err := wsl.CleanBuildkitCache(ctx); err == nil {
-				results = append(results, i18n.T("clean.buildkit")+":\n"+res)
+				results = append(results, i18n.T("clean.buildkit")+":\n"+wsl.CleanCleanupOutput(res))
 			}
 
 			safeUI(func() {

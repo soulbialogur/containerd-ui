@@ -28,6 +28,22 @@
     "exited": "Остановлен",
     "dead": "Мёртв"
   },
+  "build_phase": {
+    "preparing": "Подготовка...",
+    "resolving_deps": "Разрешение зависимостей...",
+    "using_cache": "Используем кэш...",
+    "pulling": "Загрузка образов...",
+    "verifying": "Проверка целостности...",
+    "unpacking": "Распаковка слоя...",
+    "compiling": "Компиляция...",
+    "linking": "Линковка...",
+    "optimizing": "Оптимизация образа...",
+    "saving": "Сохранение образа...",
+    "success": "Успешно!",
+    "error": "Ошибка сборки!",
+    "building": "Сборка...",
+    "cancelled": "Отменено..."
+  },
   "tabs": {
     "status": "Статус",
     "containers": "Контейнеры",
@@ -92,6 +108,8 @@
     "detail_timeout": "Таймаут/ошибка проверки",
     "detail_unavailable": "Недоступен",
     "install_all_title": "Установить все компоненты",
+    "install_all_checking": "Проверка компонентов...",
+    "install_all_done": "Все компоненты установлены",
     "install_all_confirm_title": "Установка компонентов",
     "install_all_confirm_text": "Вы уверены, что хотите установить все компоненты?\n\nБудут установлены:\n• WSL2 + Debian\n• containerd\n• nerdctl\n• BuildKit\n\nЭто займёт несколько минут. Продолжить?",
     "install_all_success": "✅ Установка завершена успешно!",
@@ -231,7 +249,9 @@
     "disk_available": "Доступно",
     "refresh": "Обновить"
   },
-  "logs": {
+    "logs": {
+      "startup": "Логи запуска",
+      "live": "Показывать в реальном времени",
     "title": "Логи",
     "container": "Контейнер:",
     "follow": "Follow",

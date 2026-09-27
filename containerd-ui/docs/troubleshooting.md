@@ -148,6 +148,36 @@ You can clear the cache with the **Clear Cache** button or increase the limit in
 
 If the cache fills up quickly, increase `max_wsl_cache_size` and adjust `wsl_cache_cleanup_at` to match the project size. These settings are applied dynamically during the next cleanup pass; the environment does not need to be recreated.
 
+## Containers Die Seconds After Startup With No Error
+
+Symptoms: containers start normally, report `Up`, then all of them disappear a few seconds later. `nerdctl ps -a` shows them back in `Created` or `Exited` state, `nerdctl logs` is empty or stops mid-startup, there is no OOM kill in `dmesg`, and the containerd journal shows no stop request.
+
+This is usually not a Docker, Compose, or application problem. WSL 2.6.x added automatic shutdown of idle distributions: `instanceIdleTimeout` defaults to `15000` ms. A detached (`-d`) container does **not** count as distribution activity — when the last `wsl.exe` session exits, WSL powers off the whole distribution about 15 seconds later, taking containerd and every container with it. Container logs stay silent because the entire VM stops instead of the containers failing.
+
+Confirm it by comparing boot lifetimes with the moments containers died:
+
+```bash
+journalctl --list-boots
+```
+
+Many short-lived boots ending in a clean `systemd-poweroff` (no crash, no OOM) is the signature. On the Windows side, `wsl -l -v` may also show the distribution as `Stopped` while you expect the stack to keep running.
+
+Fix: disable the idle shutdown in `%UserProfile%\.wslconfig`:
+
+```ini
+[general]
+instanceIdleTimeout=-1
+```
+
+Then apply it with a full restart of WSL:
+
+```powershell
+wsl --shutdown
+```
+
+and start the stack again. Keep a restart policy (`--restart always` or a Compose `restart:` policy) as a safety net, but it does not replace this fix: after an idle power-off, distributions only come back when something runs a `wsl.exe` command, so containers remain stopped until the next access.
+
+
 ## The Progress Bar Does Not Update
 
 This is often caused by an inactive tab or enabled `economy_mode`. In this mode, inactive tabs pause updates, so the UI may look stuck while background operations continue. Make the tab active and temporarily disable `economy_mode` to diagnose the issue.
