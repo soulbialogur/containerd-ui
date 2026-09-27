@@ -3,6 +3,7 @@ package wsl
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -401,7 +402,11 @@ func TestRootFallbackStartsStackWithRootComposeCommand(t *testing.T) {
 }
 
 func TestContainerdComposeBuildsLocalImages(t *testing.T) {
-	composePath := filepath.Join("..", "..", "scripts", "containerd", "compose.yaml")
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to resolve current test file path")
+	}
+	composePath := filepath.Join(filepath.Dir(currentFile), "..", "..", "scripts", "containerd", "compose.yaml")
 	composeData, err := os.ReadFile(composePath)
 	if err != nil {
 		t.Fatalf("read containerd compose: %v", err)
