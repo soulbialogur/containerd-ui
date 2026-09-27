@@ -2,8 +2,6 @@
   
 An app for managing containers, builds, and deployments through WSL2, containerd, nerdctl, and BuildKit.
   
-> This project's documentation is written mainly for Russian-speaking users — all the core instructions, configuration details, and troubleshooting guides are in Russian. If you have any questions about installation, using the app, or licensing, reach out at soulbialogur@gmail.com.
-  
 ## What It Does
   
 Containerd UI is a Windows wrapper around your container environment. It helps you:
