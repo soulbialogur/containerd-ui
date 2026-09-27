@@ -670,6 +670,35 @@ func GetCdNamespace() string {
 	return DefaultConfig().CdNamespace
 }
 
+func NormalizeScriptsPath(projectPath, scriptsPath string) string {
+	cleaned := strings.TrimSpace(scriptsPath)
+	if cleaned == "" {
+		cleaned = DefaultConfig().ScriptsPath
+	}
+	cleaned = filepath.Clean(cleaned)
+	if filepath.IsAbs(cleaned) {
+		return cleaned
+	}
+	if projectPath == "" {
+		return cleaned
+	}
+
+	projectClean := filepath.Clean(projectPath)
+	if cleaned == projectClean || cleaned == filepath.Clean(filepath.Join(projectClean, ".")) {
+		return projectClean
+	}
+	if strings.EqualFold(cleaned, projectClean) || strings.EqualFold(cleaned, filepath.Clean(filepath.Join(projectClean, "."))) {
+		return projectClean
+	}
+	if strings.HasPrefix(strings.ToLower(cleaned), strings.ToLower(projectClean)+string(filepath.Separator)) {
+		return cleaned
+	}
+	if strings.HasPrefix(strings.ToLower(cleaned), strings.ToLower(projectClean)+"/") {
+		return cleaned
+	}
+	return filepath.Clean(filepath.Join(projectClean, cleaned))
+}
+
 func GetScriptsPath() string {
 	configCache.RLock()
 	if configCache.config != nil {

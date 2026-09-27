@@ -586,10 +586,11 @@ func ensureDeploymentServices(ctx context.Context, projectPath string, backend, 
 }
 
 func findDeploymentComposeFile(projectPath string) (string, error) {
+	scriptsPath := NormalizeScriptsPath(projectPath, GetScriptsPath())
 	candidates := []string{
 		filepath.Join(projectPath, "compose.yaml"),
 		filepath.Join(projectPath, "docker-compose.yml"),
-		filepath.Join(projectPath, GetScriptsPath(), "compose.yaml"),
+		filepath.Join(scriptsPath, "compose.yaml"),
 	}
 
 	for _, path := range candidates {

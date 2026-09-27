@@ -401,6 +401,23 @@ func TestRootFallbackStartsStackWithRootComposeCommand(t *testing.T) {
 	}
 }
 
+func TestNormalizeScriptsPathAvoidsDuplicateSegments(t *testing.T) {
+	projectPath := filepath.Join("C:", "work", "containerd-ui")
+	for _, tc := range []struct {
+		name string
+		given string
+		want string
+	}{
+		{name: "relative", given: "scripts/containerd", want: filepath.Join(projectPath, "scripts", "containerd")},
+		{name: "already absolute", given: filepath.Join("C:", "work", "containerd-ui", "scripts", "containerd"), want: filepath.Join("C:", "work", "containerd-ui", "scripts", "containerd")},
+		{name: "duplicate prefix", given: filepath.Join(projectPath, "scripts", "containerd"), want: filepath.Join(projectPath, "scripts", "containerd")},
+	} {
+		if got := NormalizeScriptsPath(projectPath, tc.given); got != tc.want {
+			t.Fatalf("NormalizeScriptsPath(%q, %q) = %q, want %q", projectPath, tc.given, got, tc.want)
+		}
+	}
+}
+
 func TestContainerdComposeBuildsLocalImages(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {

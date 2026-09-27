@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -1659,6 +1660,7 @@ func startProjectStackAsRoot(ctx context.Context, projectPath string, onLine fun
 }
 
 func projectStackStartScript(projectPath, scriptsPath string) string {
+	scriptsPath = NormalizeScriptsPath(projectPath, scriptsPath)
 	return fmt.Sprintf(`unset XDG_RUNTIME_DIR CONTAINERD_ROOTLESS_ROOTLESSKIT_FLAGS CONTAINERD_ROOTLESS_ROOTLESSKIT_STATE_DIR CONTAINERD_ROOTLESS_ROOTLESSKIT_NET CONTAINERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER;
 export XDG_RUNTIME_DIR=/run/user/0; mkdir -p /run/user/0; chmod 0700 /run/user/0;
 export CONTAINERD_ADDRESS=%s CONTAINERD_NAMESPACE=%s;
@@ -1839,8 +1841,8 @@ func buildkitCleanupScript() string {
 }
 
 func buildProjectImagesAsRoot(ctx context.Context, projectPath string, onLine func(string)) (string, error) {
-	scriptsPath := GetScriptsPath()
-	composeFile := scriptsPath + "/compose.yaml"
+	scriptsPath := NormalizeScriptsPath(projectPath, GetScriptsPath())
+	composeFile := filepath.Join(scriptsPath, "compose.yaml")
 	script := buildProjectImagesOneShotRootScript(projectPath, composeFile)
 	return runWSLAsRootWithCancelStream(ctx, script, onLine)
 }
