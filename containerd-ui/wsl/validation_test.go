@@ -423,7 +423,7 @@ func TestContainerdComposeBuildsLocalImages(t *testing.T) {
 	if !ok {
 		t.Fatal("failed to resolve current test file path")
 	}
-	composePath := filepath.Join(filepath.Dir(currentFile), "..", "..", "scripts", "containerd", "compose.yaml")
+	composePath := filepath.Join(filepath.Dir(currentFile), "..", "scripts", "containerd", "compose.yaml")
 	composeData, err := os.ReadFile(composePath)
 	if err != nil {
 		t.Fatalf("read containerd compose: %v", err)
