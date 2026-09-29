@@ -5,15 +5,31 @@ import (
 	"containerd-ui/ui"
 	"containerd-ui/wsl"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget" // <-- добавлено
+	"fyne.io/fyne/v2/widget"
 )
 
 var cachedIcon []byte
+
+type windowContentLayout struct{}
+
+func (windowContentLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(size)
+}
+
+func (windowContentLayout) MinSize([]fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(640, 0)
+}
 
 func loadIcon(path string) fyne.Resource {
 	if cachedIcon != nil {
@@ -65,7 +81,7 @@ func main() {
 	// Тяжёлые вкладки создаются после появления окна. Это не блокирует холодный
 	// старт ожиданием WSL и позволяет показывать интерфейс сразу.
 	newPlaceholder := func() fyne.CanvasObject {
-		return container.NewCenter(widget.NewLabel("Загрузка..."))
+		return panelWrap(container.NewCenter(widget.NewLabel("Загрузка...")))
 	}
 	statusTabItem := container.NewTabItem(i18n.T("tabs.status"), newPlaceholder())
 	containersTabItem := container.NewTabItem(i18n.T("tabs.containers"), newPlaceholder())
@@ -93,7 +109,7 @@ func main() {
 		settingsTabItem,
 	)
 
-	tabs.SetTabLocation(container.TabLocationTop)
+	tabs.SetTabLocation(container.TabLocationLeading)
 	ui.SetStatusMetricNavigation(func(tabName string) {
 		for _, item := range tabs.Items {
 			if item.Text == tabName {
@@ -111,17 +127,25 @@ func main() {
 	}
 
 	win.SetOnClosed(func() {
-		ui.StopAllTabs()
-		wsl.Shutdown()
+		ui.Shutdown()
+		myApp.Quit()
 	})
 
-	win.SetContent(tabs)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		ui.Shutdown()
+		myApp.Quit()
+	}()
+
+	win.SetContent(container.New(windowContentLayout{}, tabs))
 
 	// Вкладки создаются по одной после появления окна. Последовательность
 	// снижает конкуренцию за WSL при холодном запуске.
 	go func() {
 		loadTab := func(item *container.TabItem, build func() fyne.CanvasObject) {
-			content := build()
+			content := panelWrap(build())
 			fyne.Do(func() {
 				item.Content = content
 				tabs.Refresh()
@@ -141,4 +165,4 @@ func main() {
 	}()
 
 	win.ShowAndRun()
-}
+	}
