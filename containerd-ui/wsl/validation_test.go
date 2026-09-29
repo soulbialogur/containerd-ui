@@ -1,6 +1,8 @@
 package wsl
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +21,15 @@ func TestCacheManagerInvalidateDoesNotRecurse(t *testing.T) {
 
 	for _, eventType := range events {
 		GlobalCacheManager.Invalidate(eventType, "test")
+	}
+}
+
+func TestDetectProjectPathContextStopsWhenCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if path := DetectProjectPathContext(ctx); path != "" {
+		t.Fatalf("DetectProjectPathContext() = %q after cancellation, want empty path", path)
 	}
 }
 
@@ -161,6 +172,25 @@ func TestBuildkitStopScriptKillsProcessesAndSockets(t *testing.T) {
 			t.Fatalf("stop script should contain %q, got:\n%s", want, script)
 		}
 	}
+}
+
+func TestShutdownCancelsAppContextAndIsIdempotent(t *testing.T) {
+	ctx := AppContext()
+	select {
+	case <-ctx.Done():
+		t.Fatal("app context should still be active before shutdown")
+	default:
+	}
+
+	Shutdown()
+
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("app context should be canceled after shutdown")
+	}
+
+	Shutdown()
 }
 
 func TestBuildkitStartScriptWaitsForReadiness(t *testing.T) {
@@ -402,17 +432,43 @@ func TestRootFallbackStartsStackWithRootComposeCommand(t *testing.T) {
 func TestNormalizeScriptsPathAvoidsDuplicateSegments(t *testing.T) {
 	projectPath := filepath.Join("C:", "work", "containerd-ui")
 	for _, tc := range []struct {
-		name string
+		name  string
 		given string
-		want string
+		want  string
 	}{
-		{name: "relative", given: "scripts/containerd", want: filepath.Join(projectPath, "scripts", "containerd")},
-		{name: "already absolute", given: filepath.Join("C:", "work", "containerd-ui", "scripts", "containerd"), want: filepath.Join("C:", "work", "containerd-ui", "scripts", "containerd")},
-		{name: "duplicate prefix", given: filepath.Join(projectPath, "scripts", "containerd"), want: filepath.Join(projectPath, "scripts", "containerd")},
+		{name: "relative", given: "scripts/containerd", want: filepath.ToSlash(filepath.Join(projectPath, "scripts", "containerd"))},
+		{name: "already absolute", given: filepath.ToSlash(filepath.Join("C:", "work", "containerd-ui", "scripts", "containerd")), want: filepath.ToSlash(filepath.Join("C:", "work", "containerd-ui", "scripts", "containerd"))},
+		{name: "duplicate prefix", given: filepath.ToSlash(filepath.Join(projectPath, "scripts", "containerd")), want: filepath.ToSlash(filepath.Join(projectPath, "scripts", "containerd"))},
 	} {
 		if got := NormalizeScriptsPath(projectPath, tc.given); got != tc.want {
 			t.Fatalf("NormalizeScriptsPath(%q, %q) = %q, want %q", projectPath, tc.given, got, tc.want)
 		}
+	}
+}
+
+func TestFindProjectComposeFilePrefersProjectRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	composePath := filepath.Join(tmpDir, "compose.yaml")
+	if err := os.WriteFile(composePath, []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatalf("write compose.yaml: %v", err)
+	}
+	if got := findProjectComposeFile(tmpDir); filepath.ToSlash(got) != filepath.ToSlash(composePath) {
+		t.Fatalf("findProjectComposeFile(%q) = %q, want %q", tmpDir, got, composePath)
+	}
+}
+
+func TestFindProjectComposeFileResolvesParentFolder(t *testing.T) {
+	tmpDir := t.TempDir()
+	composePath := filepath.Join(tmpDir, "compose.yaml")
+	if err := os.WriteFile(composePath, []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatalf("write compose.yaml: %v", err)
+	}
+	nestedPath := filepath.Join(tmpDir, "scripts", "containerd")
+	if err := os.MkdirAll(nestedPath, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if got := findProjectComposeFile(nestedPath); filepath.ToSlash(got) != filepath.ToSlash(composePath) {
+		t.Fatalf("findProjectComposeFile(%q) = %q, want %q", nestedPath, got, composePath)
 	}
 }
 
@@ -454,6 +510,19 @@ func TestVolumeRemovalTargetsIncludeActualMountpoint(t *testing.T) {
 	}
 	if !containsString(targets, "/var/lib/nerdctl/default/volumes/containerd_soul-dialogue-postgres-data") {
 		t.Fatalf("expected nerdctl fallback path in deletion targets: %#v", targets)
+	}
+}
+
+func TestUnusedNetworkCleanupProtectsProjectNetworks(t *testing.T) {
+	script := unusedNetworkCleanupScript()
+	for _, want := range []string{
+		"soul-dialogue|soul-dialogue-*",
+		"containerd_soul-dialogue|containerd_soul-dialogue-*",
+		"Пропущена защищённая сеть: $net",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("network cleanup script should contain %q", want)
+		}
 	}
 }
 

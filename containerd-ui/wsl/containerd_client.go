@@ -303,6 +303,7 @@ var (
 
 	cdMu      sync.Mutex
 	cdIPValid atomic.Bool
+	shutdownOnce sync.Once
 )
 
 func init() {
@@ -428,20 +429,27 @@ func getCDClient() (*cdclient.Client, error) {
 }
 
 func Shutdown() {
-	if appCancel != nil {
-		appCancel()
-	}
-	cdMu.Lock()
-	if cdConn != nil {
-		cdConn.Close()
-		cdConn = nil
-	}
-	cdClient = nil
-	cdErr = nil
-	cdAvailable.Store(false)
-	cdMu.Unlock()
-	cdIPValid.Store(false)
+	shutdownOnce.Do(func() {
+		if appCancel != nil {
+			appCancel()
+		}
+		cdMu.Lock()
+		if cdConn != nil {
+			cdConn.Close()
+			cdConn = nil
+		}
+		cdClient = nil
+		cdErr = nil
+		cdAvailable.Store(false)
+		cdMu.Unlock()
+		cdIPValid.Store(false)
 
+		cmd := exec.Command(WslExecutable(), "--shutdown")
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if err := cmd.Start(); err == nil {
+			_ = cmd.Process.Release()
+		}
+	})
 }
 
 func AppContext() context.Context {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -585,20 +586,49 @@ func ensureDeploymentServices(ctx context.Context, projectPath string, backend, 
 	return output, nil
 }
 
-func findDeploymentComposeFile(projectPath string) (string, error) {
-	scriptsPath := NormalizeScriptsPath(projectPath, GetScriptsPath())
-	candidates := []string{
-		filepath.Join(projectPath, "compose.yaml"),
-		filepath.Join(projectPath, "docker-compose.yml"),
-		filepath.Join(scriptsPath, "compose.yaml"),
+func findProjectComposeFile(projectPath string) string {
+	projectPath = strings.TrimSpace(projectPath)
+	if projectPath == "" {
+		return ""
 	}
 
-	for _, path := range candidates {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path, nil
+	checked := make(map[string]struct{})
+	for cur := projectPath; cur != "" && cur != "."; {
+		if _, seen := checked[cur]; seen {
+			break
+		}
+		checked[cur] = struct{}{}
+
+		for _, name := range []string{"compose.yaml", "docker-compose.yml"} {
+			candidate := path.Join(cur, name)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate
+			}
+		}
+
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+
+	scriptsPath := NormalizeScriptsPath(projectPath, GetScriptsPath())
+	for _, candidate := range []string{
+		path.Join(scriptsPath, "compose.yaml"),
+		path.Join(scriptsPath, "docker-compose.yml"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
 		}
 	}
+	return ""
+}
 
+func findDeploymentComposeFile(projectPath string) (string, error) {
+	if composeFile := findProjectComposeFile(projectPath); composeFile != "" {
+		return composeFile, nil
+	}
 	return "", fmt.Errorf("compose-файл не найден в корне проекта или в %s", GetScriptsPath())
 }
 

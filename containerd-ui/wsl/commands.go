@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -1661,12 +1661,16 @@ func startProjectStackAsRoot(ctx context.Context, projectPath string, onLine fun
 
 func projectStackStartScript(projectPath, scriptsPath string) string {
 	scriptsPath = NormalizeScriptsPath(projectPath, scriptsPath)
+	composeFile := findProjectComposeFile(projectPath)
+	if composeFile == "" {
+		composeFile = path.Join(scriptsPath, "compose.yaml")
+	}
 	return fmt.Sprintf(`unset XDG_RUNTIME_DIR CONTAINERD_ROOTLESS_ROOTLESSKIT_FLAGS CONTAINERD_ROOTLESS_ROOTLESSKIT_STATE_DIR CONTAINERD_ROOTLESS_ROOTLESSKIT_NET CONTAINERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER;
 export XDG_RUNTIME_DIR=/run/user/0; mkdir -p /run/user/0; chmod 0700 /run/user/0;
 export CONTAINERD_ADDRESS=%s CONTAINERD_NAMESPACE=%s;
 cd %s && if [ -f backend/config/.env ]; then set -a; . backend/config/.env; set +a; fi;
 nerdctl() { command nerdctl --address "$CONTAINERD_ADDRESS" --namespace "$CONTAINERD_NAMESPACE" "$@"; };
-compose_file=%s/compose.yaml;
+compose_file=%s;
 nerdctl compose -f "$compose_file" down --remove-orphans || true;
 nerdctl compose -f "$compose_file" up -d;
 nerdctl start soul-dialogue-postgres soul-dialogue-redis soul-dialogue-backend soul-dialogue-worker soul-dialogue-frontend;
@@ -1690,7 +1694,7 @@ for attempt in $(seq 1 90); do
     sleep 1;
 done
 	nerdctl ps --format '{{.Names}}\t{{.Status}}'`,
-		rootContainerdAddr, GetCdNamespace(), shellQuote(projectPath), shellQuote(scriptsPath))
+		rootContainerdAddr, GetCdNamespace(), shellQuote(projectPath), shellQuote(composeFile))
 }
 
 // oneShotLaunchFailMarker — маркер в выводе скрипта: сам демон не поднялся
@@ -1841,8 +1845,10 @@ func buildkitCleanupScript() string {
 }
 
 func buildProjectImagesAsRoot(ctx context.Context, projectPath string, onLine func(string)) (string, error) {
-	scriptsPath := NormalizeScriptsPath(projectPath, GetScriptsPath())
-	composeFile := filepath.Join(scriptsPath, "compose.yaml")
+	composeFile := findProjectComposeFile(projectPath)
+	if composeFile == "" {
+		composeFile = path.Join(NormalizeScriptsPath(projectPath, GetScriptsPath()), "compose.yaml")
+	}
 	script := buildProjectImagesOneShotRootScript(projectPath, composeFile)
 	return runWSLAsRootWithCancelStream(ctx, script, onLine)
 }
@@ -2029,7 +2035,24 @@ func CleanUnusedVolumes(ctx context.Context) (string, error) {
 }
 
 func CleanUnusedNetworks(ctx context.Context) (string, error) {
-	script := `
+	script := unusedNetworkCleanupScript()
+	result, err := runWSLAsRootWithCancelStream(ctx, script, nil)
+	result = CleanCleanupOutput(result)
+	if err != nil {
+		return result, err
+	}
+	CDInvalidateContainersCache()
+	return result, nil
+}
+
+var protectedNetworkPrefixes = []string{"soul-dialogue", "containerd_soul-dialogue"}
+
+func unusedNetworkCleanupScript() string {
+	var protectedCases []string
+	for _, prefix := range protectedNetworkPrefixes {
+		protectedCases = append(protectedCases, prefix, prefix+"-*")
+	}
+	return fmt.Sprintf(`
 all_nets=$(nerdctl network ls --format '{{.Name}}' 2>/dev/null)
 if [ -z "$all_nets" ]; then
 	echo "Нет сетей для очистки"
@@ -2044,6 +2067,12 @@ removed=0
 for net in $all_nets; do
 	net=$(echo "$net" | xargs)
 	[ -z "$net" ] && continue
+	case "$net" in
+		%s)
+			echo "Пропущена защищённая сеть: $net"
+			continue
+			;;
+	esac
 	skip=0
 	for s in $skip_nets; do
 		[ "$net" = "$s" ] && skip=1
@@ -2064,14 +2093,7 @@ if [ $removed -eq 0 ]; then
 else
 	echo "Удалено неиспользуемых сетей: $removed"
 fi
-`
-	result, err := runWSLAsRootWithCancelStream(ctx, script, nil)
-	result = CleanCleanupOutput(result)
-	if err != nil {
-		return result, err
-	}
-	CDInvalidateContainersCache()
-	return result, nil
+	`, strings.Join(protectedCases, "|"))
 }
 
 func CleanUntaggedImages(ctx context.Context) (string, error) {

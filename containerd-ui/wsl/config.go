@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -675,28 +676,27 @@ func NormalizeScriptsPath(projectPath, scriptsPath string) string {
 	if cleaned == "" {
 		cleaned = DefaultConfig().ScriptsPath
 	}
-	cleaned = filepath.Clean(cleaned)
-	if filepath.IsAbs(cleaned) {
+	cleaned = strings.ReplaceAll(cleaned, "\\", "/")
+	cleaned = path.Clean(cleaned)
+	if path.IsAbs(cleaned) {
 		return cleaned
 	}
 	if projectPath == "" {
 		return cleaned
 	}
 
-	projectClean := filepath.Clean(projectPath)
-	if cleaned == projectClean || cleaned == filepath.Clean(filepath.Join(projectClean, ".")) {
+	projectClean := strings.ReplaceAll(projectPath, "\\", "/")
+	projectClean = path.Clean(projectClean)
+	if cleaned == projectClean || cleaned == path.Clean(projectClean+"/") || cleaned == "." {
 		return projectClean
 	}
-	if strings.EqualFold(cleaned, projectClean) || strings.EqualFold(cleaned, filepath.Clean(filepath.Join(projectClean, "."))) {
+	if strings.EqualFold(cleaned, projectClean) || strings.EqualFold(cleaned, ".") {
 		return projectClean
-	}
-	if strings.HasPrefix(strings.ToLower(cleaned), strings.ToLower(projectClean)+string(filepath.Separator)) {
-		return cleaned
 	}
 	if strings.HasPrefix(strings.ToLower(cleaned), strings.ToLower(projectClean)+"/") {
 		return cleaned
 	}
-	return filepath.Clean(filepath.Join(projectClean, cleaned))
+	return path.Clean(path.Join(projectClean, cleaned))
 }
 
 func GetScriptsPath() string {
@@ -771,9 +771,19 @@ func GetAutoRefreshInterval() int {
 
 // DetectProjectPath ищет docker-compose.yml в стандартных местах.
 func DetectProjectPath() string {
+	return DetectProjectPathContext(context.Background())
+}
+
+func DetectProjectPathContext(ctx context.Context) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return ""
+	}
 	const maxDepth = 4
 	if wd, err := os.Getwd(); err == nil {
-		if found := walkForCompose(filepath.Clean(wd), maxDepth); found != "" {
+		if found := walkForComposeContext(ctx, filepath.Clean(wd), maxDepth); found != "" {
 			return found
 		}
 	}
@@ -791,8 +801,11 @@ func DetectProjectPath() string {
 		filepath.Join(home, "OneDrive", "Рабочий стол"),
 	}
 	for _, dir := range projectDirs {
+		if ctx.Err() != nil {
+			return ""
+		}
 		if _, err := os.Stat(dir); err == nil {
-			if found := walkForCompose(filepath.Clean(dir), maxDepth); found != "" {
+			if found := walkForComposeContext(ctx, filepath.Clean(dir), maxDepth); found != "" {
 				return found
 			}
 		}
@@ -801,6 +814,10 @@ func DetectProjectPath() string {
 }
 
 func walkForCompose(root string, maxDepth int) string {
+	return walkForComposeContext(context.Background(), root, maxDepth)
+}
+
+func walkForComposeContext(ctx context.Context, root string, maxDepth int) string {
 	root = filepath.Clean(root)
 	rootDepth := countPathDepth(root)
 	composeFiles := map[string]bool{
@@ -819,6 +836,9 @@ func walkForCompose(root string, maxDepth int) string {
 	}
 	var found string
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return nil
 		}
