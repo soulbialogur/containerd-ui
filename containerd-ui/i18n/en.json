@@ -130,6 +130,7 @@
     "ports": "Ports",
     "state": "State",
     "refresh": "Refresh",
+    "refresh_error": "Failed to refresh the container list: %s",
     "start": "Start",
     "stop": "Stop",
     "restart": "Restart",
@@ -276,6 +277,8 @@
     "check": "Check",
     "size": "Size: %s",
     "size_unknown": "Size: —",
+    "read_error": "Could not read database volume %s: %s",
+    "volume_missing": "The database volume has not been created yet. This is a normal state before the project is initialized.",
     "refresh": "Refresh"
   },
   "clean": {
@@ -462,6 +465,7 @@
     "detected_msg": "Project found: %s",
     "not_detected": "Not Found",
     "not_detected_msg": "Failed to automatically detect project path. Specify manually.",
+    "detect_timeout": "Search stopped after the 2-minute timeout. Specify the project path manually.",
     "project_added": "Project Added",
     "project_added_ok": "Project added: %s\n✅ Found docker-compose.yml",
     "project_added_warn": "Project added: %s\n⚠️ docker-compose.yml not found",
@@ -490,6 +494,7 @@
   "common": {
     "loading": "Loading...",
     "error": "Error",
+    "wsl_distro_missing": "No WSL distribution is selected or could be found.",
     "success": "Success",
     "retry": "Retry",
     "close": "Close"
