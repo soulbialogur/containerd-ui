@@ -155,20 +155,18 @@ func BuildResourcesTab() fyne.CanvasObject {
 	btnRefresh = widget.NewButton(i18n.T("resources.refresh"), refresh)
 
 	resourceCards := container.NewVBox(
-		container.NewBorder(nil, nil, nil, widget.NewLabelWithStyle(i18n.T("resources.title"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			container.NewHBox(
-				container.NewVBox(
-					widget.NewLabelWithStyle(i18n.T("resources.ram_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
-					lblRAM,
-				),
-				container.NewVBox(
-					widget.NewLabelWithStyle(i18n.T("resources.cpu_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
-					lblCPU,
-				),
-				container.NewVBox(
-					widget.NewLabelWithStyle(i18n.T("resources.disk_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
-					lblDisk,
-				),
+		container.NewHBox(
+			container.NewVBox(
+				widget.NewLabelWithStyle(i18n.T("resources.ram_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
+				lblRAM,
+			),
+			container.NewVBox(
+				widget.NewLabelWithStyle(i18n.T("resources.cpu_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
+				lblCPU,
+			),
+			container.NewVBox(
+				widget.NewLabelWithStyle(i18n.T("resources.disk_label"), fyne.TextAlignLeading, fyne.TextStyle{Bold: false}),
+				lblDisk,
 			),
 		),
 		widget.NewSeparator(),

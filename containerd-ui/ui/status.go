@@ -17,7 +17,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -744,7 +743,7 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 			}
 		}()
 	})
-	btnStartBuildkitd.Importance = widget.HighImportance
+	btnStartBuildkitd.Importance = widget.MediumImportance
 
 	btnStopBuildkitd = widget.NewButton(i18n.T("status.stop_buildkitd"), func() {
 		btnStartBuildkitd.Disable()
@@ -772,7 +771,7 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 			updateUI()
 		}()
 	})
-	btnStopBuildkitd.Importance = widget.DangerImportance
+	btnStopBuildkitd.Importance = widget.MediumImportance
 
 	// --- Ссылки на скачивание компонентов и кнопка установки ---
 	installBtn := widget.NewButton(i18n.T("status.install_all_title"), func() {
@@ -782,18 +781,15 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	installBtn.SetText(i18n.T("status.install_all_checking"))
 	installBtn.Disable()
 
-	downloads := container.NewVBox(
-		container.NewHBox(
-			widget.NewHyperlink(i18n.T("status.download_wsl"), mustParseURL("https://learn.microsoft.com/ru-ru/windows/wsl/install")),
-			widget.NewHyperlink(i18n.T("status.download_containerd"), mustParseURL("https://containerd.io/downloads/")),
-			widget.NewHyperlink(i18n.T("status.download_nerdctl"), mustParseURL("https://github.com/containerd/nerdctl/releases")),
-		),
-		container.NewHBox(
-			widget.NewHyperlink(i18n.T("status.download_buildkit"), mustParseURL("https://github.com/moby/buildkit/releases")),
-			widget.NewHyperlink(i18n.T("status.download_cloudflared"), mustParseURL("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")),
-		),
+	downloads := newResponsiveFlow(
+		widget.NewHyperlink(i18n.T("status.download_wsl"), mustParseURL("https://learn.microsoft.com/ru-ru/windows/wsl/install")),
+		widget.NewHyperlink(i18n.T("status.download_containerd"), mustParseURL("https://containerd.io/downloads/")),
+		widget.NewHyperlink(i18n.T("status.download_nerdctl"), mustParseURL("https://github.com/containerd/nerdctl/releases")),
+		widget.NewHyperlink(i18n.T("status.download_buildkit"), mustParseURL("https://github.com/moby/buildkit/releases")),
+		widget.NewHyperlink(i18n.T("status.download_cloudflared"), mustParseURL("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")),
+		installBtn,
 	)
-	downloadsCard := widget.NewCard(i18n.T("status.downloads_title"), i18n.T("status.downloads_hint"), container.NewBorder(nil, nil, nil, installBtn, downloads))
+	downloadsCard := widget.NewCard(i18n.T("status.downloads_title"), i18n.T("status.downloads_hint"), downloads)
 
 	registerTabNamed(i18n.T("tabs.status"), tab)
 
@@ -813,19 +809,19 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	}()
 
 	return withVerticalScroll(container.NewVBox(
-		container.NewHBox(btnRefresh, autoRefresh, layout.NewSpacer(), lastCheckLabel),
+		newResponsiveFlow(btnRefresh, autoRefresh, lastCheckLabel),
 		widget.NewSeparator(),
-		container.NewAdaptiveGrid(4, wslCard.CanvasObject(), containerdCard.CanvasObject(), buildkitdCard.CanvasObject(), nerdctlCard.CanvasObject()),
+		newResponsiveGrid(4, wslCard.CanvasObject(), containerdCard.CanvasObject(), buildkitdCard.CanvasObject(), nerdctlCard.CanvasObject()),
 		widget.NewSeparator(),
 		widget.NewLabelWithStyle(i18n.T("status.overview"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewAdaptiveGrid(4,
+		newResponsiveGrid(4,
 			metrics["containers_running"].widget(),
 			metrics["images"].widget(),
 			metrics["volumes"].widget(),
 			metrics["networks"].widget(),
 		),
 		widget.NewSeparator(),
-		container.NewHBox(
+		newResponsiveFlow(
 			widget.NewLabelWithStyle(i18n.T("status.buildkitd_control"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			btnStartBuildkitd, btnStopBuildkitd,
 		),

@@ -3,6 +3,7 @@ package ui
 import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -13,18 +14,39 @@ import (
 func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	var containers []wsl.Container
 	selectedID := ""
+	liveRequested := false
 	var liveTicker *time.Ticker
 	var liveStop chan struct{}
 
+	placeholder := i18n.T("logs.select_container")
 	logText := widget.NewMultiLineEntry()
 	logText.Wrapping = fyne.TextWrapWord
 	logText.Disable()
 	logText.SetPlaceHolder(i18n.T("logs.select_hint"))
+	logText.Hide()
+
+	emptyLogs := widget.NewLabel(i18n.T("logs.no_logs"))
+	emptyLogs.Wrapping = fyne.TextWrapWord
+	emptyLogs.Alignment = fyne.TextAlignCenter
+	emptyLogs.Hide()
+
+	showEmptyLogs := func() {
+		logText.Hide()
+		emptyLogs.Show()
+	}
+	showLogText := func(text string) {
+		emptyLogs.Hide()
+		logText.SetText(text)
+		logText.Show()
+		logText.Refresh()
+	}
 
 	loadLogs := func(id string) {
 		if id == "" {
 			safeUI(func() {
-				logText.SetText(i18n.T("logs.select_hint"))
+				showEmptyLogs()
+				logText.SetText("")
+				emptyLogs.SetText(i18n.T("logs.no_logs"))
 				logText.Refresh()
 			})
 			return
@@ -38,11 +60,15 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			logs, err := wsl.GetContainerLogs(id, 200)
 			safeUI(func() {
 				if err == nil {
-					logText.SetText(logs)
+					if strings.TrimSpace(logs) == "" {
+						emptyLogs.SetText(i18n.T("logs.no_logs"))
+						showEmptyLogs()
+						return
+					}
+					showLogText(logs)
 				} else {
-					logText.SetText(i18n.T("op.error", err.Error()))
+					showLogText(i18n.T("op.error", err.Error()))
 				}
-				logText.Refresh()
 			})
 		}()
 	}
@@ -60,7 +86,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 
 	startLiveLogs := func() {
 		stopLiveLogs()
-		if selectedID == "" {
+		if selectedID == "" || economyMode.Load() {
 			return
 		}
 		liveTicker = time.NewTicker(time.Second)
@@ -79,7 +105,14 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 		}(selectedID, liveTicker, liveStop)
 	}
 
-	selector := widget.NewSelect([]string{}, func(name string) {
+	selector := widget.NewSelect([]string{placeholder}, func(name string) {
+		if name == placeholder || name == "" {
+			selectedID = ""
+			stopLiveLogs()
+			showEmptyLogs()
+			logText.SetText("")
+			return
+		}
 		for _, c := range containers {
 			displayName := c.Name
 			if displayName == "" {
@@ -88,13 +121,14 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			if displayName == name {
 				selectedID = c.ID
 				loadLogs(selectedID)
-				if liveTicker != nil {
+				if liveRequested {
 					startLiveLogs()
 				}
 				return
 			}
 		}
 	})
+	selector.SetSelected(placeholder)
 
 	refresh := func() {
 		go func() {
@@ -106,7 +140,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			data, err := wsl.ListContainers(true)
 			safeUI(func() {
 				if err != nil {
-					logText.SetText(i18n.T("op.error", err.Error()))
+					showLogText(i18n.T("op.error", err.Error()))
 					return
 				}
 				selectedName := ""
@@ -130,16 +164,24 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 					}
 				}
 				selectedID = newSelectedID
+				if len(names) == 0 {
+					selector.Options = []string{placeholder}
+					selector.SetSelected(placeholder)
+					showEmptyLogs()
+					return
+				}
 				selector.Options = names
 				selector.Refresh()
 				if selectedName != "" && newSelectedID != "" {
 					selector.SetSelected(selectedName)
+				} else {
+					selector.SetSelected(placeholder)
 				}
 				if newSelectedID != "" {
 					loadLogs(newSelectedID)
 				} else {
-					logText.SetText(i18n.T("logs.select_hint"))
-					logText.Refresh()
+					showEmptyLogs()
+					emptyLogs.SetText(i18n.T("logs.no_logs"))
 				}
 			})
 		}()
@@ -150,11 +192,21 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	})
 
 	liveCheck := widget.NewCheck(i18n.T("logs.live"), func(checked bool) {
+		liveRequested = checked
 		if checked {
 			startLiveLogs()
 		} else {
 			stopLiveLogs()
 		}
+	})
+	RegisterEconomyModeListener(func(enabled bool) {
+		safeUI(func() {
+			if enabled {
+				stopLiveLogs()
+			} else if liveRequested {
+				startLiveLogs()
+			}
+		})
 	})
 
 	btnClearLogs := widget.NewButton(i18n.T("logs.clear"), func() {
@@ -193,5 +245,6 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 
 	refresh()
 
-	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, logText))
+	logPanel := container.NewStack(logText, emptyLogs)
+	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, logPanel))
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -19,6 +20,33 @@ func BuildCleanTab() fyne.CanvasObject {
 
 	resultScroll := container.NewScroll(lblResult)
 	resultScroll.SetMinSize(fyne.NewSize(0, 200))
+	var resultTimer *time.Timer
+	var resultVersion uint64
+	var setResult func(string, bool)
+	setResult = func(text string, autoHide bool) {
+		resultVersion++
+		version := resultVersion
+		if resultTimer != nil {
+			resultTimer.Stop()
+			resultTimer = nil
+		}
+		lblResult.SetText(text)
+		lblResult.Refresh()
+		if !autoHide || text == "" {
+			return
+		}
+		resultTimer = time.AfterFunc(20*time.Second, func() {
+			safeUI(func() {
+				if resultVersion != version {
+					return
+				}
+				resultVersion++
+				resultTimer = nil
+				lblResult.SetText("")
+				lblResult.Refresh()
+			})
+		})
+	}
 
 	var formatCleanupError func(string, error) string
 
@@ -74,14 +102,14 @@ func BuildCleanTab() fyne.CanvasObject {
 	btnCache := widget.NewButton(i18n.T("clean.cache"), nil)
 	btnCache.OnTapped = func() {
 		safeUI(func() {
-			lblResult.SetText(i18n.T("clean.cleaning_cache"))
+			setResult(i18n.T("clean.cleaning_cache"), false)
 			btnCache.Disable()
 		})
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					safeUI(func() {
-						lblResult.SetText(i18n.T("clean.panic", r))
+						setResult(i18n.T("clean.panic", r), true)
 						btnCache.Enable()
 						btnCache.Refresh()
 						lblResult.Refresh()
@@ -95,7 +123,7 @@ func BuildCleanTab() fyne.CanvasObject {
 			}
 			res, err := wsl.CleanNerdctlCache()
 			safeUI(func() {
-				lblResult.SetText(formatCacheResult(res, err))
+				setResult(formatCacheResult(res, err), true)
 				btnCache.Enable()
 				btnCache.Refresh()
 				lblResult.Refresh()
@@ -106,14 +134,14 @@ func BuildCleanTab() fyne.CanvasObject {
 	btnVolumes := widget.NewButton(i18n.T("clean.volumes"), nil)
 	btnVolumes.OnTapped = func() {
 		safeUI(func() {
-			lblResult.SetText(i18n.T("clean.cleaning_volumes"))
+			setResult(i18n.T("clean.cleaning_volumes"), false)
 			btnVolumes.Disable()
 		})
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					safeUI(func() {
-						lblResult.SetText(i18n.T("clean.panic", r))
+						setResult(i18n.T("clean.panic", r), true)
 						btnVolumes.Enable()
 						btnVolumes.Refresh()
 						lblResult.Refresh()
@@ -130,9 +158,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanUnusedVolumes(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(formatCleanupResult("Неиспользуемые тома", res, err))
+					setResult(formatCleanupResult("Неиспользуемые тома", res, err), true)
 				} else {
-					lblResult.SetText(formatCleanupResult("Неиспользуемые тома", res, nil))
+					setResult(formatCleanupResult("Неиспользуемые тома", res, nil), true)
 				}
 				btnVolumes.Enable()
 				btnVolumes.Refresh()
@@ -144,14 +172,14 @@ func BuildCleanTab() fyne.CanvasObject {
 	btnNetworks := widget.NewButton(i18n.T("clean.networks"), nil)
 	btnNetworks.OnTapped = func() {
 		safeUI(func() {
-			lblResult.SetText(i18n.T("clean.cleaning_networks"))
+			setResult(i18n.T("clean.cleaning_networks"), false)
 			btnNetworks.Disable()
 		})
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					safeUI(func() {
-						lblResult.SetText(i18n.T("clean.panic", r))
+						setResult(i18n.T("clean.panic", r), true)
 						btnNetworks.Enable()
 						btnNetworks.Refresh()
 						lblResult.Refresh()
@@ -168,9 +196,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanUnusedNetworks(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(formatCleanupResult("Неиспользуемые сети", res, err))
+					setResult(formatCleanupResult("Неиспользуемые сети", res, err), true)
 				} else {
-					lblResult.SetText(formatCleanupResult("Неиспользуемые сети", res, nil))
+					setResult(formatCleanupResult("Неиспользуемые сети", res, nil), true)
 				}
 				btnNetworks.Enable()
 				btnNetworks.Refresh()
@@ -182,14 +210,14 @@ func BuildCleanTab() fyne.CanvasObject {
 	btnImages := widget.NewButton(i18n.T("clean.images"), nil)
 	btnImages.OnTapped = func() {
 		safeUI(func() {
-			lblResult.SetText(i18n.T("clean.cleaning_images"))
+			setResult(i18n.T("clean.cleaning_images"), false)
 			btnImages.Disable()
 		})
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					safeUI(func() {
-						lblResult.SetText(i18n.T("clean.panic", r))
+						setResult(i18n.T("clean.panic", r), true)
 						btnImages.Enable()
 						btnImages.Refresh()
 						lblResult.Refresh()
@@ -206,9 +234,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanUntaggedImages(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(formatCleanupResult("Образы без тегов", res, err))
+					setResult(formatCleanupResult("Образы без тегов", res, err), true)
 				} else {
-					lblResult.SetText(formatCleanupResult("Образы без тегов", res, nil))
+					setResult(formatCleanupResult("Образы без тегов", res, nil), true)
 				}
 				btnImages.Enable()
 				btnImages.Refresh()
@@ -220,14 +248,14 @@ func BuildCleanTab() fyne.CanvasObject {
 	btnBuildkit := widget.NewButton(i18n.T("clean.buildkit"), nil)
 	btnBuildkit.OnTapped = func() {
 		safeUI(func() {
-			lblResult.SetText(i18n.T("clean.cleaning_buildkit"))
+			setResult(i18n.T("clean.cleaning_buildkit"), false)
 			btnBuildkit.Disable()
 		})
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					safeUI(func() {
-						lblResult.SetText(i18n.T("clean.panic", r))
+						setResult(i18n.T("clean.panic", r), true)
 						btnBuildkit.Enable()
 						btnBuildkit.Refresh()
 						lblResult.Refresh()
@@ -244,9 +272,9 @@ func BuildCleanTab() fyne.CanvasObject {
 			res, err := wsl.CleanBuildkitCache(ctx)
 			safeUI(func() {
 				if err != nil {
-					lblResult.SetText(formatCleanupResult("Кэш BuildKit", res, err))
+					setResult(formatCleanupResult("Кэш BuildKit", res, err), true)
 				} else {
-					lblResult.SetText(formatCleanupResult("Кэш BuildKit", res, nil))
+					setResult(formatCleanupResult("Кэш BuildKit", res, nil), true)
 				}
 				btnBuildkit.Enable()
 				btnBuildkit.Refresh()
@@ -258,14 +286,14 @@ func BuildCleanTab() fyne.CanvasObject {
 	btnFull := widget.NewButton(i18n.T("clean.full"), nil)
 	btnFull.OnTapped = func() {
 		safeUI(func() {
-			lblResult.SetText(i18n.T("clean.cleaning_full"))
+			setResult(i18n.T("clean.cleaning_full"), false)
 			btnFull.Disable()
 		})
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					safeUI(func() {
-						lblResult.SetText(i18n.T("clean.panic", r))
+						setResult(i18n.T("clean.panic", r), true)
 						btnFull.Enable()
 						btnFull.Refresh()
 						lblResult.Refresh()
@@ -303,9 +331,9 @@ func BuildCleanTab() fyne.CanvasObject {
 
 			safeUI(func() {
 				if len(results) > 0 {
-					lblResult.SetText(i18n.T("clean.cleaned") + ":\n" + strings.Join(results, "\n"))
+					setResult(i18n.T("clean.cleaned")+":\n"+strings.Join(results, "\n"), true)
 				} else {
-					lblResult.SetText(i18n.T("clean.cleaned_all"))
+					setResult(i18n.T("clean.cleaned_all"), true)
 				}
 				btnFull.Enable()
 				btnFull.Refresh()

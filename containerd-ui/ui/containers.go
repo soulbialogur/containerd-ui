@@ -234,7 +234,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				containers, err := wsl.ListContainers(true)
 				if err != nil {
 					safeUI(func() {
-						showErrorDialog(win, fmt.Sprintf("Не удалось обновить список контейнеров: %v", err))
+						showErrorDialog(win, i18n.T("containers.refresh_error", localizedWslError(err)))
 					})
 					return
 				}

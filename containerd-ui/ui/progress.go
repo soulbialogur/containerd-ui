@@ -216,8 +216,10 @@ func NewProgressBarComponent() *ProgressBarComponent {
 	bar.TextFormatter = func() string {
 		return ""
 	}
+	bar.Hide()
 	label := widget.NewLabel("")
 	label.TextStyle = fyne.TextStyle{Bold: true}
+	label.Hide()
 	cancel := widget.NewButton(i18n.T("dialogs.cancel"), func() {})
 	cancel.Hide()
 	closeBtn := widget.NewButton("✕", func() {})

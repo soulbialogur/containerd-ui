@@ -297,10 +297,10 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	cardLogs := widget.NewCard(i18n.T("deploy.logs_card"), "", logs)
 
 	content := container.NewVBox(
-		container.NewPadded(cardConfig),
-		container.NewPadded(cardProxy),
-		container.NewPadded(cardActions),
-		container.NewPadded(cardLogs),
+		container.NewPadded(wrapRoundedCard(cardConfig)),
+		container.NewPadded(wrapRoundedCard(cardProxy)),
+		container.NewPadded(wrapRoundedCard(cardActions)),
+		container.NewPadded(wrapRoundedCard(cardLogs)),
 	)
 
 	return container.NewVScroll(content)

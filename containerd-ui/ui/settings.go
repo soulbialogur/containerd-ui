@@ -3,12 +3,14 @@ package ui
 import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -30,12 +32,35 @@ func (e *ScrollableEntry) Scrolled(_ *fyne.ScrollEvent) {}
 
 func makeSettingEntry(placeHolder string) *ScrollableEntry {
 	entry := NewScrollableEntry()
+	entry.Wrapping = fyne.TextWrapOff
+	entry.Scroll = fyne.ScrollNone
 	entry.SetPlaceHolder(placeHolder)
 	return entry
 }
 
-func makeSettingRow(entry *ScrollableEntry) fyne.CanvasObject {
-	return container.NewMax(entry)
+func makeScrollableSettingEntry(placeHolder string) *ScrollableEntry {
+	entry := NewScrollableEntry()
+	entry.SetPlaceHolder(placeHolder)
+	return entry
+}
+
+func (e *ScrollableEntry) MinSize() fyne.Size {
+	return fyne.NewSize(360, 32)
+}
+
+func makeSettingRow(labelText string, entry *ScrollableEntry) fyne.CanvasObject {
+	label := widget.NewLabelWithStyle(labelText, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	label.Wrapping = fyne.TextTruncate
+	return container.NewGridWithColumns(2,
+		label,
+		container.NewCenter(container.NewMax(entry)),
+	)
+}
+
+func makeWideSettingRow(labelText string, entry *ScrollableEntry) fyne.CanvasObject {
+	label := widget.NewLabelWithStyle(labelText, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	label.Wrapping = fyne.TextTruncate
+	return container.NewBorder(nil, nil, label, nil, container.NewMax(entry))
 }
 
 func deploymentProxyUIValue(configValue string) string {
@@ -89,14 +114,14 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		dlg := dialog.NewCustom(i18n.T("settings.lang_restart"), i18n.T("dialogs.ok"),
 			widget.NewLabel(i18n.T("settings.lang_restart_msg")), win)
 		dlg.Show()
-		wsl.Shutdown()
+		Shutdown()
 	}
 	langHint := widget.NewLabel(i18n.T("settings.lang_hint"))
 	langHint.TextStyle = fyne.TextStyle{Italic: true}
 
 	entryProjectName := makeSettingEntry(i18n.T("settings.project_name_placeholder"))
 
-	entryPath := makeSettingEntry(i18n.T("settings.project_path_placeholder"))
+	entryPath := makeScrollableSettingEntry(i18n.T("settings.project_path_placeholder"))
 	entryPath.SetText(wsl.GetActiveProjectPath())
 	entryPath.OnChanged = func(text string) {
 		projects := wsl.GetProjects()
@@ -320,9 +345,11 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	compressionRadio.Horizontal = true
 	compressionRadio.SetSelected(config.Compression)
 
-	compressionLevel := widget.NewSlider(1, 9)
-	compressionLevel.SetValue(float64(config.CompressionLevel))
-	compressionLevel.Step = 1
+	compressionLevel := widget.NewEntry()
+	compressionLevel.Wrapping = fyne.TextWrapOff
+	compressionLevel.Scroll = fyne.ScrollNone
+	compressionLevel.SetPlaceHolder("1-9")
+	compressionLevel.SetText(strconv.Itoa(config.CompressionLevel))
 	if config.Compression == "gzip" || config.Compression == "zstd" {
 		compressionLevel.Enable()
 	} else {
@@ -330,8 +357,11 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	}
 	compressionLevelLabel := widget.NewLabel(i18n.T("settings.compression_level", float64(config.CompressionLevel)))
 
-	compressionLevel.OnChanged = func(value float64) {
-		compressionLevelLabel.SetText(i18n.T("settings.compression_level", value))
+	compressionLevel.OnChanged = func(value string) {
+		level, err := strconv.Atoi(value)
+		if err == nil && level >= 1 && level <= 9 {
+			compressionLevelLabel.SetText(i18n.T("settings.compression_level", float64(level)))
+		}
 	}
 
 	compressionRadio.OnChanged = func(value string) {
@@ -374,7 +404,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		entryBuildkitSize.SetText(cfg.BuildkitMaxSize)
 		checkSquash.SetChecked(cfg.SquashLayers)
 		compressionRadio.SetSelected(cfg.Compression)
-		compressionLevel.SetValue(float64(cfg.CompressionLevel))
+		compressionLevel.SetText(strconv.Itoa(cfg.CompressionLevel))
 		compressionLevelLabel.SetText(i18n.T("settings.compression_level", float64(cfg.CompressionLevel)))
 		if cfg.Compression == "gzip" || cfg.Compression == "zstd" {
 			compressionLevel.Enable()
@@ -448,27 +478,36 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		btnDetect.Refresh()
 
 		go func() {
-			select {
-			case <-wsl.AppContext().Done():
+			ctx, cancel := context.WithTimeout(wsl.AppContext(), 2*time.Minute)
+			defer cancel()
+			path := wsl.DetectProjectPathContext(ctx)
+			searchErr := ctx.Err()
+			if wsl.AppContext().Err() != nil {
 				return
-			default:
 			}
 
-			path := wsl.DetectProjectPath()
-			if path != "" {
-				err := wsl.SetProjectPath(path)
-				if err != nil {
-					dialog.ShowError(err, win)
-				} else {
+			var setPathErr error
+			if searchErr == nil && path != "" {
+				setPathErr = wsl.SetProjectPath(path)
+			}
+			safeUI(func() {
+				btnDetect.Enable()
+				btnDetect.SetText(i18n.T("settings.auto_detect"))
+				btnDetect.Refresh()
+				switch {
+				case searchErr == context.DeadlineExceeded:
+					dialog.ShowCustom(i18n.T("settings.not_detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.detect_timeout")), win)
+				case searchErr != nil:
+					return
+				case setPathErr != nil:
+					dialog.ShowError(setPathErr, win)
+				case path != "":
 					updateUI()
 					dialog.ShowCustom(i18n.T("settings.detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.detected_msg", path)), win)
+				default:
+					dialog.ShowCustom(i18n.T("settings.not_detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.not_detected_msg")), win)
 				}
-			} else {
-				dialog.ShowCustom(i18n.T("settings.not_detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.not_detected_msg")), win)
-			}
-			btnDetect.Enable()
-			btnDetect.SetText(i18n.T("settings.auto_detect"))
-			btnDetect.Refresh()
+			})
 		}()
 	}
 
@@ -596,7 +635,12 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 		cfg.SquashLayers = checkSquash.Checked
 		cfg.Compression = compressionRadio.Selected
-		cfg.CompressionLevel = int(compressionLevel.Value)
+		compressionLevelValue, err := strconv.Atoi(compressionLevel.Text)
+		if err != nil || compressionLevelValue < 1 || compressionLevelValue > 9 {
+			dialog.ShowError(fmt.Errorf("уровень сжатия должен быть целым числом от 1 до 9"), win)
+			return
+		}
+		cfg.CompressionLevel = compressionLevelValue
 		cfg.DeploymentProxy = deploymentProxyConfigValue(proxyRadio.Selected)
 		cfg.DeployEmail = strings.TrimSpace(entryDeployEmail.Text)
 		cfg.DeployServiceBackend = strings.TrimSpace(entryBackendService.Text)
@@ -654,44 +698,34 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 	basicCard := widget.NewCard(i18n.T("settings.basic"), "",
 		container.NewVBox(
-			widget.NewLabelWithStyle(i18n.T("settings.project_path"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryPath),
+			makeWideSettingRow(i18n.T("settings.project_path"), entryPath),
 			container.NewHBox(btnOpenExplorer, btnCheckPath, btnDetect),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.wsl_distro"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryDistro),
+			makeSettingRow(i18n.T("settings.wsl_distro"), entryDistro),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.grpc_port"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryCdPort),
+			makeSettingRow(i18n.T("settings.grpc_port"), entryCdPort),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.namespace"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryCdNamespace),
+			makeSettingRow(i18n.T("settings.namespace"), entryCdNamespace),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.log_tail"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryLogTail),
+			makeSettingRow(i18n.T("settings.log_tail"), entryLogTail),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.cache_ttl"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryCacheTTL),
+			makeSettingRow(i18n.T("settings.cache_ttl"), entryCacheTTL),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.max_cache_size"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryMaxWSLCacheSize),
+			makeSettingRow(i18n.T("settings.max_cache_size"), entryMaxWSLCacheSize),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.cache_cleanup"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryWSLCacheCleanupAt),
+			makeSettingRow(i18n.T("settings.cache_cleanup"), entryWSLCacheCleanupAt),
 			widget.NewSeparator(),
 
-			widget.NewLabelWithStyle(i18n.T("settings.auto_refresh"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryRefreshInterval),
+			makeSettingRow(i18n.T("settings.auto_refresh"), entryRefreshInterval),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.idle_stop"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryIdleStopMinutes),
+			makeSettingRow(i18n.T("settings.idle_stop"), entryIdleStopMinutes),
 		),
 	)
 
@@ -701,7 +735,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			widget.NewSeparator(),
 			widget.NewLabelWithStyle(i18n.T("settings.compression"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			compressionRadio,
-			container.NewHBox(compressionLevel, compressionLevelLabel),
+			container.NewHBox(container.NewGridWrap(fyne.NewSize(56, 32), compressionLevel), compressionLevelLabel),
 			container.NewHBox(
 				widget.NewLabel(i18n.T("settings.compression_hint")),
 			),
@@ -728,55 +762,43 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 	serviceCard := widget.NewCard(i18n.T("settings.services"), i18n.T("settings.project_name_hint"),
 		container.NewVBox(
-			widget.NewLabelWithStyle(i18n.T("settings.deploy_network"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryDeployNetwork),
+			makeSettingRow(i18n.T("settings.deploy_network"), entryDeployNetwork),
 			widget.NewLabel(i18n.T("settings.network_hint")),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.backend_service"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryBackendService),
+			makeSettingRow(i18n.T("settings.backend_service"), entryBackendService),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.frontend_service"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryFrontendService),
+			makeSettingRow(i18n.T("settings.frontend_service"), entryFrontendService),
 			serviceHint,
 		),
 	)
 
 	limitCard := widget.NewCard(i18n.T("settings.limits"), "",
 		container.NewVBox(
-			widget.NewLabelWithStyle(i18n.T("settings.cpu_limit"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryCPU),
+			makeSettingRow(i18n.T("settings.cpu_limit"), entryCPU),
 			cpuHint,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.memory_limit"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryMemory),
+			makeSettingRow(i18n.T("settings.memory_limit"), entryMemory),
 			memoryHint,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.parallel_builds"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryMaxParallel),
+			makeSettingRow(i18n.T("settings.parallel_builds"), entryMaxParallel),
 			parallelHint,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.container_concurrency"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryContainerConcurrency),
+			makeSettingRow(i18n.T("settings.container_concurrency"), entryContainerConcurrency),
 			widget.NewLabel(i18n.T("settings.container_concurrency_hint")),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.buildkit_ttl"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryBuildkitTTL),
+			makeSettingRow(i18n.T("settings.buildkit_ttl"), entryBuildkitTTL),
 			buildkitTTLLimit,
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.buildkit_max_size"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryBuildkitSize),
+			makeSettingRow(i18n.T("settings.buildkit_max_size"), entryBuildkitSize),
 			buildkitSizeLimit,
 		),
 	)
 
 	projectCard := widget.NewCard(i18n.T("settings.projects"), i18n.T("settings.project_list_hint"),
 		container.NewVBox(
-			widget.NewLabelWithStyle(i18n.T("settings.active_project"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			container.NewVBox(
-				makeSettingRow(entryPath),
-				container.NewHBox(btnAddProject, btnRemoveProject, btnRenameProject),
-				widget.NewSeparator(),
-			),
+			makeWideSettingRow(i18n.T("settings.active_project"), entryPath),
+			container.NewHBox(btnAddProject, btnRemoveProject, btnRenameProject),
+			widget.NewSeparator(),
 			widget.NewLabelWithStyle(i18n.T("settings.project_list"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			container.NewMax(projectsList),
 			widget.NewLabel(i18n.T("settings.project_list_hint")),
@@ -785,17 +807,13 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 	envCard := widget.NewCard(i18n.T("settings.environment"), i18n.T("settings.environment_hint"),
 		container.NewVBox(
-			widget.NewLabelWithStyle(i18n.T("settings.shell"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryShell),
+			makeSettingRow(i18n.T("settings.shell"), entryShell),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.init_system"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryInitSystem),
+			makeSettingRow(i18n.T("settings.init_system"), entryInitSystem),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.pkg_manager"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryPkgManager),
+			makeSettingRow(i18n.T("settings.pkg_manager"), entryPkgManager),
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle(i18n.T("settings.privilege_cmd"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			makeSettingRow(entryPrivilegeCmd),
+			makeSettingRow(i18n.T("settings.privilege_cmd"), entryPrivilegeCmd),
 			container.NewHBox(btnDetectEnv),
 		),
 	)
@@ -818,15 +836,15 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	)
 
 	content := container.NewVBox(
-		container.NewPadded(langCard),
-		container.NewPadded(basicCard),
-		container.NewPadded(envCard),
-		container.NewPadded(buildCard),
-		container.NewPadded(proxyCard),
-		container.NewPadded(serviceCard),
-		container.NewPadded(limitCard),
-		container.NewPadded(projectCard),
-		container.NewPadded(actionsCard),
+		container.NewPadded(wrapRoundedCard(langCard)),
+		container.NewPadded(wrapRoundedCard(basicCard)),
+		container.NewPadded(wrapRoundedCard(envCard)),
+		container.NewPadded(wrapRoundedCard(buildCard)),
+		container.NewPadded(wrapRoundedCard(proxyCard)),
+		container.NewPadded(wrapRoundedCard(serviceCard)),
+		container.NewPadded(wrapRoundedCard(limitCard)),
+		container.NewPadded(wrapRoundedCard(projectCard)),
+		container.NewPadded(wrapRoundedCard(actionsCard)),
 	)
 
 	updateUI()

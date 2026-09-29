@@ -24,6 +24,8 @@ func setRefreshButtonLoading(button *widget.Button, label string, loading bool) 
 }
 
 var economyMode atomic.Bool
+var economyModeListenersMu sync.Mutex
+var economyModeListeners []func(bool)
 
 type tabActive struct {
 	mu     sync.Mutex
@@ -41,26 +43,34 @@ func newTabActive(initialActive bool, period time.Duration, onTick func()) *tabA
 		onTick: onTick,
 		done:   make(chan struct{}),
 	}
-	if initialActive {
+	if initialActive && !economyMode.Load() {
 		t.startTicker(period)
 	}
 	return t
 }
 
 func (ta *tabActive) startTicker(period time.Duration) {
-	ta.ticker = time.NewTicker(period)
+	if ta.ticker != nil || !ta.active || economyMode.Load() {
+		return
+	}
+	if ta.done == nil {
+		ta.done = make(chan struct{})
+	}
+	ticker := time.NewTicker(period)
+	ta.ticker = ticker
+	done := ta.done
 	go func() {
-		defer ta.ticker.Stop()
+		defer ticker.Stop()
 		for {
 			select {
-			case <-ta.ticker.C:
+			case <-ticker.C:
 				ta.mu.Lock()
 				shouldTick := ta.active
 				ta.mu.Unlock()
 				if shouldTick && !economyMode.Load() && ta.onTick != nil {
 					ta.onTick()
 				}
-			case <-ta.done:
+			case <-done:
 				return
 			case <-wsl.AppContext().Done():
 				return
@@ -70,7 +80,50 @@ func (ta *tabActive) startTicker(period time.Duration) {
 }
 
 func SetEconomyMode(enabled bool) {
-	economyMode.Store(enabled)
+	if economyMode.Swap(enabled) == enabled {
+		return
+	}
+
+	allTabsMu.Lock()
+	for _, tab := range allTabs {
+		tab.mu.Lock()
+		if enabled {
+			tab.stopTicker()
+		} else {
+			tab.startTicker(tab.period)
+		}
+		tab.mu.Unlock()
+	}
+	allTabsMu.Unlock()
+
+	economyModeListenersMu.Lock()
+	listeners := append([]func(bool){}, economyModeListeners...)
+	economyModeListenersMu.Unlock()
+	for _, listener := range listeners {
+		listener(enabled)
+	}
+}
+
+func RegisterEconomyModeListener(listener func(bool)) {
+	if listener == nil {
+		return
+	}
+	economyModeListenersMu.Lock()
+	economyModeListeners = append(economyModeListeners, listener)
+	enabled := economyMode.Load()
+	economyModeListenersMu.Unlock()
+	listener(enabled)
+}
+
+func (ta *tabActive) stopTicker() {
+	if ta.ticker != nil {
+		ta.ticker.Stop()
+		ta.ticker = nil
+	}
+	if ta.done != nil {
+		close(ta.done)
+		ta.done = nil
+	}
 }
 
 func (ta *tabActive) SetActive(active bool) {
@@ -84,12 +137,7 @@ func (ta *tabActive) SetActive(active bool) {
 		ta.startTicker(ta.period)
 	} else {
 		ta.active = false
-		if ta.ticker != nil {
-			ta.ticker.Stop()
-			ta.ticker = nil
-		}
-		close(ta.done)
-		ta.done = make(chan struct{})
+		ta.stopTicker()
 	}
 }
 
@@ -103,14 +151,7 @@ func (ta *tabActive) Stop() {
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 	ta.active = false
-	if ta.ticker != nil {
-		ta.ticker.Stop()
-		ta.ticker = nil
-	}
-	if ta.done != nil {
-		close(ta.done)
-		ta.done = nil
-	}
+	ta.stopTicker()
 }
 
 var (
@@ -174,4 +215,9 @@ func StopAllTabs() {
 	}
 	allTabs = nil
 	tabsByName = make(map[string]*tabActive)
+}
+
+func Shutdown() {
+	StopAllTabs()
+	wsl.Shutdown()
 }

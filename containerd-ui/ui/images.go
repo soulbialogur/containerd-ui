@@ -69,8 +69,9 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 
 			data, err := wsl.ListImages()
 			if err == nil {
-				images = data
 				safeUI(func() {
+					rendered := data
+					images = rendered
 					imageList.Refresh()
 				})
 			}
@@ -92,6 +93,17 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 				widget.NewLabel(i18n.T("images.confirm_remove", selectedID)),
 				func(ok bool) {
 					if ok {
+						imageID := selectedID
+						previousImages := append([]wsl.Image(nil), images...)
+						selectedID = ""
+						for index, image := range images {
+							if image.ID == imageID {
+								images = append(images[:index], images[index+1:]...)
+								break
+							}
+						}
+						imageList.Refresh()
+
 						go func() {
 							select {
 							case <-wsl.AppContext().Done():
@@ -99,27 +111,28 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 							default:
 							}
 
-							removeErr := wsl.RemoveImage(selectedID)
+							removeErr := wsl.RemoveImage(imageID)
 							wsl.ClearImageSizeCache()
-							if removeErr != nil {
-								safeUI(func() {
+							data, listErr := wsl.ListImages()
+							safeUI(func() {
+								if listErr == nil {
+									images = data
+								} else if removeErr != nil {
+									images = previousImages
+								}
+								imageList.Refresh()
+								if removeErr != nil {
 									dialog.ShowError(removeErr, win)
-								})
-								return
-							}
-							data, err := wsl.ListImages()
-							if err == nil {
-								images = data
-								safeUI(func() {
-									imageList.Refresh()
-								})
-							}
+								} else if listErr != nil {
+									dialog.ShowError(listErr, win)
+								}
+							})
 						}()
 					}
 				},
 				win,
 			)
-			confirmDialog.Resize(fyne.NewSize(420, 180))
+			confirmDialog.Resize(fyne.NewSize(500, 180))
 			confirmDialog.Show()
 		}
 	})

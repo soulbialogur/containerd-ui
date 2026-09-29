@@ -81,8 +81,8 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 
 			data, err := wsl.ListVolumes()
 			if err == nil {
-				volumes = data
 				safeUI(func() {
+					volumes = data
 					volumeList.Refresh()
 				})
 			}
@@ -101,11 +101,23 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 			return
 		}
 		volumeName := selectedName
-		dialog.ShowConfirm(
+		confirmDialog := dialog.NewCustomConfirm(
 			i18n.T("volumes.remove_title"),
-			i18n.T("volumes.confirm_remove", volumeName),
+			i18n.T("dialogs.ok"),
+			i18n.T("dialogs.cancel"),
+			widget.NewLabel(i18n.T("volumes.confirm_remove", volumeName)),
 			func(ok bool) {
 				if ok {
+					previousVolumes := append([]wsl.Volume(nil), volumes...)
+					selectedName = ""
+					for index, volume := range volumes {
+						if volume.Name == volumeName {
+							volumes = append(volumes[:index], volumes[index+1:]...)
+							break
+						}
+					}
+					volumeList.Refresh()
+
 					go func(name string) {
 						select {
 						case <-wsl.AppContext().Done():
@@ -114,25 +126,27 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 						}
 
 						removeErr := wsl.RemoveVolume(name)
-						data, err := wsl.ListVolumes()
-						if err == nil {
-							volumes = data
-							safeUI(func() {
-								volumeList.Refresh()
-							})
-						}
-						if removeErr != nil {
-							safeUI(func() {
+						data, listErr := wsl.ListVolumes()
+						safeUI(func() {
+							if listErr == nil {
+								volumes = data
+							} else if removeErr != nil {
+								volumes = previousVolumes
+							}
+							volumeList.Refresh()
+							if removeErr != nil {
 								dialog.ShowError(removeErr, win)
-							})
-							return
-						}
-						selectedName = ""
+							} else if listErr != nil {
+								dialog.ShowError(listErr, win)
+							}
+						})
 					}(volumeName)
 				}
 			},
 			win,
 		)
+		confirmDialog.Resize(fyne.NewSize(500, 180))
+		confirmDialog.Show()
 	})
 
 	btnRefresh = widget.NewButton(i18n.T("volumes.refresh"), refresh)
