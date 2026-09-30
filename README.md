@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-
+[![Build Status](https://github.com/soulbialogur/containerd-ui/actions/workflows/main.yml/badge.svg)](https://github.com/soulbialogur/containerd-ui/actions)
 
 # 🚀 Containerd UI
 
