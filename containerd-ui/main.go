@@ -144,6 +144,8 @@ func main() {
 	// Вкладки создаются по одной после появления окна. Последовательность
 	// снижает конкуренцию за WSL при холодном запуске.
 	go func() {
+		wsl.CheckService()
+
 		loadTab := func(item *container.TabItem, build func() fyne.CanvasObject) {
 			content := panelWrap(build())
 			fyne.Do(func() {

@@ -1,6 +1,8 @@
 # Containerd UI
   
 An app for managing containers, builds, and deployments through WSL2, containerd, nerdctl, and BuildKit.
+
+> **Status: Stable.** The current release is ready for regular use with the supported Windows and WSL2 runtime stack described below.
   
 ## What It Does
   
@@ -13,17 +15,17 @@ Containerd UI is a Windows wrapper around your container environment. It helps y
 - diagnose and clean up your environment
 ## Supported Environment
 
-The documented and tested runtime stack is:
+The supported runtime stack is:
 
 - Windows 10/11;
 - WSL2;
-- Debian in WSL2;
-- systemd inside Debian;
+- Alpine Linux in WSL2;
+- OpenRC inside Alpine;
 - containerd;
 - nerdctl;
 - BuildKit (`buildkitd` and `buildctl`).
 
-The application detects Debian, the shell, systemd, `apt`, and available tools automatically.
+The application detects Alpine, the shell, OpenRC, `apk`, and available tools automatically.
   
 ## Documentation
   
@@ -36,13 +38,13 @@ You'll find detailed guides in the [docs](docs/README.md) folder:
 - [Troubleshooting](docs/troubleshooting.md)
 ## Quick Start
 
-### Debian (Default)
+### Alpine + OpenRC (Default)
 
-1. Install WSL2 and Debian:
+1. Install WSL2 and Alpine:
    ```powershell
-   wsl --install Debian
+   wsl --install --distribution Alpine
    ```
-2. Install Debian runtime components: containerd, nerdctl, and BuildKit (see [installation.md](docs/installation.md)).
+2. Install Alpine runtime components: containerd, nerdctl, and BuildKit (see [installation.md](docs/installation.md)).
 3. Install Go and MinGW if you build the Windows application from source.
 4. Install `cloudflared` if you need Cloudflare Tunnel.
 5. Build the app:
