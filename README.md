@@ -1,12 +1,14 @@
 <div align="center">
 
-[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.26.5+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Build Status](https://github.com/soulbialogur/containerd-ui/actions/workflows/main.yml/badge.svg)](https://github.com/soulbialogur/containerd-ui/actions)
 
 # 🚀 Containerd UI
 
 **Containerd UI** is a native Windows application (Go + Fyne) that provides a graphical interface for managing containers via WSL2, containerd, nerdctl and BuildKit.
+
+**Status: Stable.** The supported runtime is Alpine Linux with OpenRC inside WSL2.
 
 It is built on a two‑layer architecture: the primary channel is the containerd gRPC API, with a fallback to WSL + nerdctl.
 
@@ -19,7 +21,7 @@ The tool is ideal for local development, building, and deploying projects in a W
 ## 🚀 Features
 
 - **Container management**  
-Start, stop, remove, perform batch operations, and update images without data loss.
+Start, stop, remove, perform batch operations, update images, and inspect status, uptime and health.
 
 - **Project building**  
 Support for `nerdctl compose` with BuildKit, a visual progress bar, and cooperative build cancellation.
@@ -27,11 +29,14 @@ Support for `nerdctl compose` with BuildKit, a visual progress bar, and cooperat
 - **Interface localization**  
 Switch between English and Russian in one click from the Settings tab. The choice is stored in `config.json` and survives restarts.
 
-- **Real‑time resource monitoring**  
-Display CPU, RAM, disk I/O, network I/O, and per‑container statistics.
+- **Resource monitoring**  
+Display CPU, RAM, disk usage, network I/O, and per-container statistics.
 
 - **Network and volume management**  
-View, create, and delete networks and volumes with protection against accidental changes to system resources.
+View, create, and delete networks and volumes. Volume sizes are calculated asynchronously so the list appears without waiting for disk scans.
+
+- **Image and log inspection**  
+Image sizes and creation times are normalized when loaded. Live container logs use a cancellable stream instead of polling the full log every second.
 
 - **System cleanup**  
 6 cleanup modes: cache, dangling images, unused volumes/networks, untagged images, BuildKit cache, and a full “general” cleanup.
@@ -43,7 +48,7 @@ Choose between Traefik + Let's Encrypt and Cloudflare Tunnel. Built‑in pre‑d
 Centralised CacheManager with event‑based invalidation and metric collection (hit rate).
 
 - **Resource saving**  
-`economy_mode` automatically disables background updates for inactive tabs.
+`economy_mode` pauses background updates for inactive tabs; live log streams stop when disabled or when the selected container changes.
 
 - **Environment status**  
 Instant verification of WSL, containerd, BuildKit, nerdctl, and cloudflared health.
@@ -53,53 +58,58 @@ Instant verification of WSL, containerd, BuildKit, nerdctl, and cloudflared heal
 ## ⚙️ System Requirements
 
 - Windows 10/11 with WSL2 installed
-- A Linux distribution inside WSL — **Ubuntu 24.04 is recommended** (other distributions work too, as long as they support `systemd`)
+- **Alpine Linux inside WSL2** — the only supported runtime distribution
+- OpenRC inside Alpine
 - Components installed inside WSL:
   - `containerd`
   - `nerdctl`
-  - `buildkitd`
-- (Optional) `cloudflared` for using Cloudflare Tunnel
+  - `buildkitd` and `buildctl` (BuildKit is started on demand by the application)
+  - CNI plugins and the gRPC proxy, configured by the application installer
+- (Optional) `cloudflared` for Cloudflare Tunnel
+- Go 1.26.5+ and MinGW-w64 only when building the Windows application from source
 
 ---
 
 ## 🚀 Quick Start
 
-**Install WSL and a distribution**
+**Install WSL2 and Alpine**
 
-<pre><code>wsl --install Ubuntu-24.04</code></pre>
-
-> Ubuntu 24.04 is the recommended distribution, but any modern distro with `systemd` support will work — just adjust the commands below accordingly.
+```powershell
+wsl --install --distribution Alpine
+```
 
 **Install the container stack inside WSL**
 
-<pre><code>sudo apt update &amp;&amp; sudo apt install -y containerd nerdctl buildkit
-sudo systemctl enable --now containerd buildkit</code></pre>
+Follow [Environment Setup](../docs/installation.md) to install the Alpine packages and configure OpenRC. Start `containerd` with OpenRC; the application starts `buildkitd` when a build needs it.
 
 **Build the application**
 
-<pre><code>cd containerd-ui
-bash build.sh</code></pre>
+From PowerShell, in the repository root:
 
-Run `containerd-ui.exe` and point it to the root of your project (where `compose.yaml` is located).
+```powershell
+bash containerd-ui/build.sh
+```
 
-Check the status in the “Status” tab – all icons should be green, then you can build and deploy your project.
+Run `containerd-ui/containerd-ui.exe` and select the project root containing `compose.yaml` or `docker-compose.yml`.
+
+Check the Status tab and resolve any reported component issues before building or deploying.
 
 ---
 
 ## 📚 Documentation
 
-Detailed guides and reference information can be found in the [`containerd-ui/docs/`](containerd-ui/docs/) folder:
+Detailed guides and reference information are in the [docs](../docs/) folder:
 
-- [📄 README](containerd-ui/docs/README.md) — documentation overview and navigation.
-- [🚀 Quick Start](containerd-ui/docs/quickstart.md) — installation and first run.
-- [⚙️ Environment Setup](containerd-ui/docs/installation.md) — configuring WSL, containerd and BuildKit.
-- [🛠️ Configuration](containerd-ui/docs/configuration.md) — application parameters and settings.
-- [🌐 Deploy to a Domain](containerd-ui/docs/deployment.md) — instructions for Traefik and Cloudflare Tunnel.
-- [🩺 Diagnostics](containerd-ui/docs/diagnostics.md) — health checks and troubleshooting.
-- [🧩 Images and Updates](containerd-ui/docs/images-and-updates.md) — working with images and the update process.
-- [📋 Project Requirements](containerd-ui/docs/project-requirements.md) — required dependencies and structure.
-- [🛟 Troubleshooting](containerd-ui/docs/troubleshooting.md) — FAQ and common errors.
-- [🧠 Architecture and Concepts](containerd-ui/docs/concepts.md) — internal design and working principles.
+- [Documentation overview](../docs/README.md)
+- [Quick Start](../docs/quickstart.md)
+- [Environment Setup](../docs/installation.md)
+- [Configuration](../docs/configuration.md)
+- [Domain Deployment](../docs/deployment.md)
+- [Diagnostics](../docs/diagnostics.md)
+- [Images and Updates](../docs/images-and-updates.md)
+- [Project Requirements](../docs/project-requirements.md)
+- [Troubleshooting](../docs/troubleshooting.md)
+- [Architecture and Concepts](../docs/concepts.md)
 
 ---
 
