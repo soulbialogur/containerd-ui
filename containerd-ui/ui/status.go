@@ -181,7 +181,7 @@ func runWSLWithTimeout(command string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), wsl.GetShell(), "-c", command)
+	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), "--exec", wsl.GetShell(), "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -200,7 +200,7 @@ func getAllComponentsStatus() []ComponentStatus {
 	}
 	statusCache.RUnlock()
 
-	svcName := wsl.GetSystemdService()
+	svcName := wsl.GetContainerdService()
 	buildkitOK := wsl.CheckBuildkitd()
 	cmd := "" +
 		"echo 'WSL_CHECK_START'; " +
@@ -218,7 +218,14 @@ func getAllComponentsStatus() []ComponentStatus {
 
 	versions := getComponentVersions()
 	distro := wsl.GetWslDistro()
-	versions["WSL"] = distro
+	if distro != "" {
+		wslVersion := versions["WSL"]
+		if wslVersion != "" && wslVersion != "—" {
+			versions["WSL"] = distro + ", " + wslVersion
+		} else {
+			versions["WSL"] = distro
+		}
+	}
 
 	var result []ComponentStatus
 	if err != nil {
@@ -277,58 +284,72 @@ type versionEntry struct {
 }
 
 func getComponentVersions() map[string]string {
-	versions := make(map[string]string)
+	versions := map[string]string{"WSL": getWindowsWslVersion()}
 
-	script := "" +
-		"echo 'WSL_VERSION'; wsl --version 2>/dev/null | head -1; " +
-		"echo 'CONTAINERD_VERSION'; containerd --version 2>/dev/null; " +
-		"echo 'BUILDKIT_VERSION'; buildctl --version 2>/dev/null; " +
-		"echo 'NERDCTL_VERSION'; nerdctl --version 2>/dev/null"
+	script := `export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
+echo "CONTAINERD_VERSION=$(containerd --version 2>/dev/null || /usr/local/bin/containerd --version 2>/dev/null || /usr/bin/containerd --version 2>/dev/null || true)"
+echo "BUILDKIT_VERSION=$(buildctl --version 2>/dev/null || /usr/local/bin/buildctl --version 2>/dev/null || /usr/bin/buildctl --version 2>/dev/null || true)"
+echo "NERDCTL_VERSION=$(nerdctl --version 2>/dev/null || /usr/local/bin/nerdctl --version 2>/dev/null || /usr/bin/nerdctl --version 2>/dev/null || true)"`
 
-	out, err := runWSLWithTimeout(script, 30*time.Second)
+	out, err := wsl.RunWSLAsRootWithTimeout(script, 30*time.Second)
 	if err != nil {
-		versions["WSL"] = "—"
-		versions["Containerd"] = "—"
-		versions["Buildkitd"] = "—"
-		versions["Nerdctl"] = "—"
-		return versions
-	}
-
-	lines := strings.Split(out, "\n")
-	var currentKey string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		switch {
-		case strings.HasPrefix(line, "WSL_VERSION"):
-			currentKey = "WSL"
-		case strings.HasPrefix(line, "CONTAINERD_VERSION"):
-			currentKey = "Containerd"
-		case strings.HasPrefix(line, "BUILDKIT_VERSION"):
-			currentKey = "Buildkitd"
-		case strings.HasPrefix(line, "NERDCTL_VERSION"):
-			currentKey = "Nerdctl"
-		case currentKey != "" && line != "":
-			versions[currentKey] = shortVersion(line)
-			currentKey = ""
+		// Скрипт завершается с exit 0 благодаря финальному `true`,
+		// но на всякий случай не теряем частичный вывод.
+		if strings.TrimSpace(out) == "" {
+			versions["Containerd"] = "—"
+			versions["Buildkitd"] = "—"
+			versions["Nerdctl"] = "—"
+			return versions
 		}
 	}
 
-	if versions["WSL"] == "" {
-		versions["WSL"] = "—"
+	for key, version := range parseComponentVersions(out) {
+		versions[key] = version
 	}
-	if versions["Containerd"] == "" {
-		versions["Containerd"] = "—"
-	}
-	if versions["Buildkitd"] == "" {
-		versions["Buildkitd"] = "—"
-	}
-	if versions["Nerdctl"] == "" {
-		versions["Nerdctl"] = "—"
+
+	for _, key := range []string{"WSL", "Containerd", "Buildkitd", "Nerdctl"} {
+		if versions[key] == "" {
+			versions[key] = "—"
+		}
 	}
 
 	return versions
+}
+
+func parseComponentVersions(output string) map[string]string {
+	versions := make(map[string]string, 3)
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(line, "\x00\uFEFF"))
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "CONTAINERD_VERSION":
+			versions["Containerd"] = shortVersion(value)
+		case "BUILDKIT_VERSION":
+			versions["Buildkitd"] = shortVersion(value)
+		case "NERDCTL_VERSION":
+			versions["Nerdctl"] = shortVersion(value)
+		}
+	}
+	return versions
+}
+
+func getWindowsWslVersion() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "--version")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := cmd.Output()
+	if err != nil {
+		return "—"
+	}
+	return parseWindowsWslVersion(string(output))
+}
+
+func parseWindowsWslVersion(output string) string {
+	return shortVersion(output)
 }
 
 func shortVersion(raw string) string {
@@ -353,18 +374,43 @@ func shortVersion(raw string) string {
 
 func areAllComponentsInstalled() bool {
 	// Проверяем наличие бинарников в WSL, а не их статус.
-	// Важно: CNI-плагины также обязательны для корректной работы bridge/networks.
-	// На Debian/WSL2 настоящий путь — /usr/lib/cni/bridge, хотя часть систем
-	// может также использовать /opt/cni/bin/bridge или /usr/libexec/cni/bridge.
-	script := "" +
-		"command -v containerd >/dev/null 2>&1 && " +
+	// CNI-плагины необходимы для корректной работы bridge и сетей в Alpine.
+	out, err := runWSLWithTimeout(runtimeComponentsProbeScript(), 10*time.Second)
+	return err == nil && runtimeComponentsAreInstalled(out, wsl.CurrentEnvironment())
+}
+
+func runtimeComponentsProbeScript() string {
+	return "if command -v containerd >/dev/null 2>&1 && " +
 		"command -v nerdctl >/dev/null 2>&1 && " +
 		"command -v buildctl >/dev/null 2>&1 && " +
-		"(test -x /opt/cni/bin/bridge || test -x /usr/lib/cni/bridge || test -x /usr/libexec/cni/bridge) && " +
-		"echo ALL_OK"
+		"(test -x /opt/cni/bin/bridge || test -x /usr/lib/cni/bridge || test -x /usr/libexec/cni/bridge); then " +
+		"printf 'NERDCTL_VERSION='; nerdctl --version; " +
+		"printf 'BUILDKIT_VERSION='; buildctl --version; echo ALL_OK; fi"
+}
 
-	out, err := runWSLWithTimeout(script, 10*time.Second)
-	return err == nil && strings.Contains(out, "ALL_OK")
+func runtimeComponentsAreInstalled(output string, environment wsl.Environment) bool {
+	if !strings.Contains(output, "ALL_OK") {
+		return false
+	}
+	if environment.PkgManager != wsl.PkgApk {
+		return true
+	}
+
+	var nerdctlVersion, buildkitVersion string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(line, "\x00\uFEFF"))
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "NERDCTL_VERSION":
+			nerdctlVersion = value
+		case "BUILDKIT_VERSION":
+			buildkitVersion = value
+		}
+	}
+	return wsl.AlpineToolchainVersionsSupported(nerdctlVersion, buildkitVersion)
 }
 
 var installInProgress = false
@@ -376,7 +422,7 @@ func checkNetwork() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), wsl.GetShell(), "-c",
+	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), "--exec", wsl.GetShell(), "-c",
 		"ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 && echo OK || echo FAIL")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.CombinedOutput()
@@ -401,31 +447,23 @@ func installAllComponents(win fyne.Window) {
 	}
 
 	// Проверяем что уже есть, чтобы не устанавливать заново
-	wslInstalled := false
+	selectedDistro := strings.TrimSpace(wsl.GetWslDistro())
+	wslInstalled := selectedDistro != ""
+	distroName := selectedDistro
 	containersInstalled := false
-
-	script := "" +
-		"wsl --version >/dev/null 2>&1 && echo 'WSL:OK' || echo 'WSL:NO'; " +
-		"command -v containerd >/dev/null 2>&1 && echo 'CD:OK' || echo 'CD:NO'; " +
-		"command -v nerdctl >/dev/null 2>&1 && echo 'NC:OK' || echo 'NC:NO'; " +
-		"command -v buildctl >/dev/null 2>&1 && echo 'BK:OK' || echo 'BK:NO'"
-
-	out, _ := runWSLWithTimeout(script, 10*time.Second)
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "WSL:OK") {
-			wslInstalled = true
-		}
-		if strings.Contains(line, "CD:OK") && strings.Contains(line, "NC:OK") && strings.Contains(line, "BK:OK") {
-			containersInstalled = true
-		}
+	if distroName == "" {
+		distroName = wsl.GetDefaultWslDistroName()
 	}
+
+	out, _ := runWSLWithTimeout(runtimeComponentsProbeScript(), 10*time.Second)
+	containersInstalled = runtimeComponentsAreInstalled(out, wsl.CurrentEnvironment())
 
 	// Показываем диалог подтверждения с информацией о том что будет установлено
 	confirmMsg := "Вы уверены, что хотите установить компоненты?\n\n"
 	if !wslInstalled {
-		confirmMsg += "• WSL2 + Debian — будет установлено\n"
+		confirmMsg += i18n.T("status.distro_will_install", distroName)
 	} else {
-		confirmMsg += "• WSL2 + Debian — уже установлено ✓\n"
+		confirmMsg += i18n.T("status.distro_installed", distroName)
 	}
 	if !containersInstalled {
 		confirmMsg += "• containerd, nerdctl, BuildKit — будут установлены\n"
@@ -484,35 +522,37 @@ func installAllComponents(win fyne.Window) {
 
 				var logs []string
 				wslSuccess := false
-				aptSuccess := false
+				installSuccess := false
 
-				// Шаг 1: WSL2 + Debian — только если не установлен
+				// Шаг 1: Alpine WSL — только если не установлен
 				if !wslInstalled {
-					progressLabel.SetText(i18n.T("status.install_wsl_debian"))
-					logs = append(logs, "📦 "+i18n.T("status.install_wsl_debian"))
+					installDistroMessage := i18n.T("status.install_wsl_distro", distroName)
+					progressLabel.SetText(installDistroMessage)
+					logs = append(logs, "📦 "+installDistroMessage)
 
 					// Быстрый таймаут для WSL установки
 					wslCtx, wslCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 					defer wslCancel()
 
-					wslCmd := exec.CommandContext(wslCtx, "powershell.exe", "-Command", "wsl --install Debian")
+					wslCmd := exec.CommandContext(wslCtx, wsl.WslExecutable(), "--install", "--distribution", distroName)
 					wslCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 					wslOut, wslErr := wslCmd.CombinedOutput()
 
 					if wslCtx.Err() == context.DeadlineExceeded {
 						logs = append(logs, "  ❌ Таймаут: WSL установка не отвечает более 2 минут")
 					} else if wslErr != nil {
-						logs = append(logs, fmt.Sprintf("  ⚠️ WSL/Debian: %s", strings.TrimSpace(string(wslOut))))
+						logs = append(logs, fmt.Sprintf("  ⚠️ WSL/%s: %s", distroName, strings.TrimSpace(string(wslOut))))
 					} else {
-						logs = append(logs, "  ✅ WSL/Debian установлен")
+						wsl.InvalidateEnvironmentCache()
+						logs = append(logs, fmt.Sprintf("  ✅ WSL/%s установлен", distroName))
 						wslSuccess = true
 					}
 				} else {
-					logs = append(logs, "📦 WSL2 + Debian — уже установлен, пропускаем")
+					logs = append(logs, "📦 WSL2 + "+distroName+" — уже установлен, пропускаем")
 					wslSuccess = true
 				}
 
-				// Шаг 2: Проверяем сеть перед apt install
+				// Шаг 2: Проверяем сеть перед установкой пакетов
 				if !containersInstalled {
 					progressLabel.SetText(i18n.T("status.install_containerd"))
 					logs = append(logs, "\n📦 "+i18n.T("status.install_containerd"))
@@ -531,51 +571,51 @@ func installAllComponents(win fyne.Window) {
 						return
 					}
 
-					// Длинный таймаут для apt — но с возможностью отмены
-					aptCtx, aptCancel := context.WithCancel(cancelCtx)
-					defer aptCancel()
-
-					installScript := "" +
-						"sudo -n apt update && " +
-						"sudo -n apt install -y containerd nerdctl buildkit containernetworking-plugins && " +
-						"sudo -n systemctl enable --now containerd && " +
-						"sudo -n systemctl enable --now buildkit"
-
-					cmd := exec.CommandContext(aptCtx, wsl.WslExecutable(), "-d", wsl.GetWslDistro(), wsl.GetShell(), "-c", installScript)
-					cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-					out, err := cmd.CombinedOutput()
-					output := strings.TrimSpace(string(out))
-
-					if aptCtx.Err() == context.Canceled {
-						logs = append(logs, "  ⏹ Установка отменена пользователем")
-					} else if aptCtx.Err() == context.DeadlineExceeded {
-						logs = append(logs, "  ❌ Таймаут: apt не отвечает более 5 минут")
-					} else if err != nil {
-						// Проверяем конкретную ошибку сети
-						if strings.Contains(strings.ToLower(output), "could not resolve") ||
-							strings.Contains(strings.ToLower(output), "temporary failure") ||
-							strings.Contains(strings.ToLower(output), "network is unreachable") {
-							logs = append(logs, "  ❌ Ошибка сети: не удалось подключиться к репозиториям\n\n"+
-								"Проверьте подключение к интернету и попробуйте снова.")
-						} else {
-							logs = append(logs, fmt.Sprintf("  ❌ Ошибка установки: %v", err))
-						}
-						if output != "" {
-							// Показываем только последние строки вывода
-							lines := strings.Split(output, "\n")
-							start := 0
-							if len(lines) > 10 {
-								start = len(lines) - 10
-							}
-							logs = append(logs, "  "+strings.Join(lines[start:], "\n  "))
-						}
+					environment := wsl.CurrentEnvironment()
+					installEnvironment := environment
+					installEnvironment.PrivilegeCmd = ""
+					installScript, commandErr := wsl.BuildRuntimeInstallCommand(installEnvironment)
+					if commandErr != nil {
+						logs = append(logs, "  ❌ "+commandErr.Error())
 					} else {
-						logs = append(logs, "  ✅ containerd, nerdctl, BuildKit установлены")
-						aptSuccess = true
+						installCtx, installCancel := context.WithCancel(cancelCtx)
+						defer installCancel()
+
+						cmd := exec.CommandContext(installCtx, wsl.WslExecutable(), "-d", distroName, "-u", "root", "--exec", wsl.ShellSh, "-c", installScript)
+						cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+						out, err := cmd.CombinedOutput()
+						output := strings.TrimSpace(string(out))
+
+						if installCtx.Err() == context.Canceled {
+							logs = append(logs, "  ⏹ Установка отменена пользователем")
+						} else if installCtx.Err() == context.DeadlineExceeded {
+							logs = append(logs, "  ❌ Таймаут: установка пакетов не завершилась вовремя")
+						} else if err != nil {
+							if strings.Contains(strings.ToLower(output), "could not resolve") ||
+								strings.Contains(strings.ToLower(output), "temporary failure") ||
+								strings.Contains(strings.ToLower(output), "network is unreachable") {
+								logs = append(logs, "  ❌ Ошибка сети: не удалось подключиться к репозиториям\n\n"+
+									"Проверьте подключение к интернету и попробуйте снова.")
+							} else {
+								logs = append(logs, fmt.Sprintf("  ❌ Ошибка установки: %v", err))
+							}
+							if output != "" {
+								lines := strings.Split(output, "\n")
+								start := 0
+								if len(lines) > 10 {
+									start = len(lines) - 10
+								}
+								logs = append(logs, "  "+strings.Join(lines[start:], "\n  "))
+							}
+						} else {
+							wsl.InvalidateEnvironmentCache()
+							logs = append(logs, "  ✅ containerd, nerdctl, BuildKit установлены")
+							installSuccess = true
+						}
 					}
 				} else {
 					logs = append(logs, "\n📦 containerd, nerdctl, BuildKit — уже установлены, пропускаем")
-					aptSuccess = true
+					installSuccess = true
 				}
 
 				// Показываем результат
@@ -590,10 +630,10 @@ func installAllComponents(win fyne.Window) {
 						return
 					}
 
-					if wslSuccess && aptSuccess {
+					if wslSuccess && installSuccess {
 						// Всё успешно — показываем сообщение об успехе
 						dialog.ShowInformation(i18n.T("status.install_all_success"), resultMsg, win)
-					} else if wslSuccess || aptSuccess {
+					} else if wslSuccess || installSuccess {
 						// Частичный успех
 						dialog.ShowInformation(i18n.T("status.install_all_partial"), resultMsg, win)
 					} else {
@@ -655,7 +695,7 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 
 		// Все изменения Fyne-виджетов — только через fyne.Do.
 		safeUI(func() {
-				setLoading(false)
+			setLoading(false)
 			for _, cs := range statuses {
 				statusText := cs.Icon
 				if cs.Version != "" {
@@ -690,14 +730,13 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 
 	btnRefresh = widget.NewButton(i18n.T("status.refresh"), func() { go updateUI() })
 
-	tab := newTabActive(true, TickerAutoRefresh, func() {
+	tab := newTabActive(false, time.Duration(wsl.GetAutoRefreshInterval())*time.Second, func() {
 		updateUI()
 	})
 
 	autoRefresh := widget.NewCheck(i18n.T("status.auto_refresh"), func(checked bool) {
 		tab.SetActive(checked)
 	})
-	autoRefresh.Checked = true
 
 	var btnStartBuildkitd *widget.Button
 	var btnStopBuildkitd *widget.Button

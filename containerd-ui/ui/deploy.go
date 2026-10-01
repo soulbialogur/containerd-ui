@@ -24,6 +24,7 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 	tokenEntry := widget.NewEntry()
 	tokenEntry.SetPlaceHolder(i18n.T("deploy.token_placeholder"))
 	tokenEntry.Hidden = true
+	tokenEntry.Password = true
 
 	httpsCheck := widget.NewCheck(i18n.T("deploy.https"), nil)
 	httpsCheck.SetChecked(true)
@@ -88,6 +89,12 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 			})
 		}()
 	})
+	if proxy == "cloudflare" {
+		cfPrefixHint.Show()
+	} else {
+		cfTokenHint.Hide()
+		btnSaveToken.Hide()
+	}
 
 	proxyOptionsContainer := container.NewVBox(httpsCheck, tokenEntry, cfTokenHint, cfPrefixHint, btnSaveToken)
 
@@ -109,13 +116,21 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 		}
 	}
 
-	btnDNS := widget.NewButton(i18n.T("deploy.check_dns"), func() {
+	var btnDNS *widget.Button
+	btnDNS = widget.NewButton(i18n.T("deploy.check_dns"), func() {
 		domain := strings.TrimSpace(domainEntry.Text)
-		if err := wsl.ValidateDomain(domain); err != nil {
-			status.SetText(i18n.T("deploy.dns_error", err.Error()))
-			return
-		}
-		status.SetText(i18n.T("deploy.dns_ok", domain))
+		btnDNS.Disable()
+		go func() {
+			err := wsl.ValidateDomain(domain)
+			safeUI(func() {
+				if err != nil {
+					status.SetText(i18n.T("deploy.dns_error", err.Error()))
+				} else {
+					status.SetText(i18n.T("deploy.dns_ok", domain))
+				}
+				btnDNS.Enable()
+			})
+		}()
 	})
 
 	btnPorts := widget.NewButton(i18n.T("deploy.check_ports"), func() {
@@ -158,11 +173,7 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 				if err != nil {
 					status.SetText("❌ " + err.Error())
 				} else {
-					proxy := wsl.GetDeploymentProxy()
 					msg := i18n.T("deploy.tools_found")
-					if proxy == "cloudflare" {
-						msg += " (Traefik + Cloudflare)"
-					}
 					status.SetText(msg)
 				}
 			})
@@ -177,10 +188,10 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 			return
 		}
 		proxy := wsl.GetDeploymentProxy()
-		if proxy == "cloudflare" && strings.TrimSpace(tokenEntry.Text) == "" {
-			status.SetText(i18n.T("deploy.specify_token"))
-			return
-		}
+		backend := backendCheck.Checked
+		frontend := frontendCheck.Checked
+		prefix := strings.TrimSpace(backendPrefix.Text)
+		https := httpsCheck.Checked
 		btnDeploy.Disable()
 		appendLog(i18n.T("deploy.check_dns_deploy"))
 		go func() {
@@ -191,22 +202,23 @@ func BuildDeployTab(win fyne.Window) fyne.CanvasObject {
 				return
 			}
 
-			proxy := wsl.GetDeploymentProxy()
 			if proxy == "cloudflare" {
 				projectPath := wsl.GetProjectPath()
-				if projectPath != "" {
-					safeUI(func() { appendLog(i18n.T("deploy.check_token")) })
-					if err := wsl.CheckCloudflareToken(projectPath); err != nil {
-						safeUI(func() { status.SetText(i18n.T("common.error") + " " + err.Error()); btnDeploy.Enable() })
-						return
-					}
+				if projectPath == "" {
+					safeUI(func() { status.SetText(i18n.T("deploy.path_not_set")); btnDeploy.Enable() })
+					return
+				}
+				safeUI(func() { appendLog(i18n.T("deploy.check_token")) })
+				if err := wsl.CheckCloudflareToken(projectPath); err != nil {
+					safeUI(func() { status.SetText(i18n.T("common.error") + " " + err.Error()); btnDeploy.Enable() })
+					return
 				}
 			}
 
 			safeUI(func() {
 				appendLog(i18n.T("deploy.generate_config"))
 			})
-			result, err := wsl.DeployDomain(ctx, domain, strings.TrimSpace(backendPrefix.Text), backendCheck.Checked, frontendCheck.Checked, httpsCheck.Checked)
+			result, err := wsl.DeployDomain(ctx, domain, prefix, backend, frontend, https)
 			safeUI(func() {
 				if err != nil {
 					status.SetText(i18n.T("deploy.deploy_error"))

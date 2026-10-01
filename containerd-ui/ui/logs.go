@@ -57,7 +57,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 				return
 			default:
 			}
-			logs, err := wsl.GetContainerLogs(id, 200)
+			logs, err := wsl.GetContainerLogs(id, wsl.GetLogTail())
 			safeUI(func() {
 				if err == nil {
 					if strings.TrimSpace(logs) == "" {

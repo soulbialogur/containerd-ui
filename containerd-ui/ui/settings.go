@@ -106,15 +106,19 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		i18n.SetLocale(locale)
 		// Сохраняем язык в config.json
 		cfg, err := wsl.LoadConfig()
-		if err == nil {
-			cfg.Language = string(locale)
-			wsl.SaveConfig(cfg)
+		if err != nil {
+			dialog.ShowError(err, win)
+			return
 		}
-		// Перезапускаем приложение для применения языка
+		cfg.Language = string(locale)
+		if err := wsl.SaveConfig(cfg); err != nil {
+			dialog.ShowError(err, win)
+			return
+		}
+		// Большинство виджетов создаёт переведённый текст один раз.
 		dlg := dialog.NewCustom(i18n.T("settings.lang_restart"), i18n.T("dialogs.ok"),
 			widget.NewLabel(i18n.T("settings.lang_restart_msg")), win)
 		dlg.Show()
-		Shutdown()
 	}
 	langHint := widget.NewLabel(i18n.T("settings.lang_hint"))
 	langHint.TextStyle = fyne.TextStyle{Italic: true}
@@ -162,16 +166,14 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	}
 
 	btnAddProject.OnTapped = func() {
-		dialog.ShowFileOpen(func(u fyne.URIReadCloser, err error) {
-			if err != nil || u == nil {
+		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+			if err != nil || uri == nil {
 				return
 			}
-			path := u.URI().Path()
+			path := uri.Path()
 			if path == "" {
-				u.Close()
 				return
 			}
-			u.Close()
 
 			composeExists := false
 			for _, name := range []string{"compose.yaml", "docker-compose.yml"} {
@@ -278,7 +280,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	entryMaxWSLCacheSize := makeSettingEntry(i18n.T("settings.max_cache_size_placeholder"))
 	entryWSLCacheCleanupAt := makeSettingEntry(i18n.T("settings.cache_cleanup_placeholder"))
 	entryRefreshInterval := makeSettingEntry(i18n.T("settings.auto_refresh_placeholder"))
-	entryIdleStopMinutes := makeSettingEntry(i18n.T("settings.idle_stop_placeholder"))
 
 	checkEconomyMode := widget.NewCheck(i18n.T("settings.economy_mode"), nil)
 	checkEconomyMode.SetChecked(config.EconomyMode)
@@ -380,7 +381,10 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	btnReset := widget.NewButton(i18n.T("settings.reset"), nil)
 
 	updateUI := func() {
-		cfg, _ := wsl.LoadConfig()
+		cfg, err := wsl.LoadConfig()
+		if err != nil || cfg == nil {
+			cfg = wsl.DefaultConfig()
+		}
 		entryPath.SetText(wsl.GetActiveProjectPath())
 		entryDistro.SetText(cfg.WslDistro)
 		entryShell.SetText(cfg.Shell)
@@ -394,7 +398,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		entryMaxWSLCacheSize.SetText(strconv.FormatInt(cfg.MaxWSLCacheSize, 10))
 		entryWSLCacheCleanupAt.SetText(strconv.Itoa(cfg.WSLCacheCleanupAt))
 		entryRefreshInterval.SetText(strconv.Itoa(cfg.AutoRefreshInterval))
-		entryIdleStopMinutes.SetText(strconv.Itoa(cfg.IdleDaemonStopMinutes))
 		checkEconomyMode.SetChecked(cfg.EconomyMode)
 		entryCPU.SetText(cfg.DefaultCPU)
 		entryMemory.SetText(cfg.DefaultMemory)
@@ -534,7 +537,18 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	}
 
 	btnSave.OnTapped = func() {
-		cfg, _ := wsl.LoadConfig()
+		cfg, err := wsl.LoadConfig()
+		if err != nil || cfg == nil {
+			if err == nil {
+				err = fmt.Errorf("не удалось загрузить конфигурацию")
+			}
+			dialog.ShowError(err, win)
+			return
+		}
+		previousDistro := strings.TrimSpace(cfg.WslDistro)
+		if previousDistro == "" {
+			previousDistro = wsl.DetectWslDistro()
+		}
 
 		if entryPath.Text != "" {
 			path := filepath.Clean(entryPath.Text)
@@ -556,9 +570,24 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				entryDistro.SetText(detected)
 				distro = detected
 			}
-			cfg.WslDistro = distro
+			if !strings.EqualFold(distro, wsl.GetDefaultWslDistroName()) {
+				dialog.ShowError(fmt.Errorf("поддерживается только WSL-дистрибутив %s", wsl.GetDefaultWslDistroName()), win)
+				return
+			}
+			cfg.WslDistro = wsl.GetDefaultWslDistroName()
 		} else {
 			cfg.WslDistro = wsl.DetectWslDistro()
+		}
+		distroChanged := !strings.EqualFold(previousDistro, strings.TrimSpace(cfg.WslDistro))
+		if distroChanged {
+			cfg.Shell = ""
+			cfg.InitSystem = ""
+			cfg.PkgManager = ""
+			cfg.PrivilegeCmd = ""
+			entryShell.SetText("")
+			entryInitSystem.SetText("")
+			entryPkgManager.SetText("")
+			entryPrivilegeCmd.SetText("")
 		}
 		if shell := entryShell.Text; shell != "" {
 			cfg.Shell = shell
@@ -603,11 +632,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		if refreshStr := entryRefreshInterval.Text; refreshStr != "" {
 			if refresh, err := strconv.Atoi(refreshStr); err == nil {
 				cfg.AutoRefreshInterval = refresh
-			}
-		}
-		if idleStopStr := entryIdleStopMinutes.Text; idleStopStr != "" {
-			if idleStop, err := strconv.Atoi(idleStopStr); err == nil && idleStop > 0 {
-				cfg.IdleDaemonStopMinutes = idleStop
 			}
 		}
 		cfg.EconomyMode = checkEconomyMode.Checked
@@ -661,10 +685,10 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		}
 
 		wsl.InitConfigCache(cfg)
-		SetEconomyMode(cfg.EconomyMode)
-		if cfg.IdleDaemonStopMinutes > 0 {
-			wsl.SetIdleDaemonThresholdForRuntime(cfg.IdleDaemonStopMinutes)
+		if distroChanged {
+			wsl.InvalidateEnvironmentCache()
 		}
+		SetEconomyMode(cfg.EconomyMode)
 		dialog.ShowCustom(i18n.T("settings.saved"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.saved_hint")), win)
 	}
 
@@ -684,6 +708,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 					return
 				}
 				wsl.InitConfigCache(cfg)
+				wsl.InvalidateEnvironmentCache()
 				SetEconomyMode(cfg.EconomyMode)
 				updateUI()
 				dialog.ShowCustom(i18n.T("settings.reset_done"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.reset_hint")), win)
@@ -724,8 +749,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			widget.NewSeparator(),
 
 			makeSettingRow(i18n.T("settings.auto_refresh"), entryRefreshInterval),
-			widget.NewSeparator(),
-			makeSettingRow(i18n.T("settings.idle_stop"), entryIdleStopMinutes),
 		),
 	)
 

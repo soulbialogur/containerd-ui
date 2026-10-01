@@ -179,7 +179,7 @@ func BuildResourcesTab() fyne.CanvasObject {
 		table,
 	)
 
-	tab := newTabActive(true, TickerResources, refresh)
+	tab := newTabActive(false, TickerResources, refresh)
 	registerTabNamed(i18n.T("tabs.resources"), tab)
 
 	refresh()

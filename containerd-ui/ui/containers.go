@@ -217,7 +217,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 	var refreshTimer *time.Timer
 	var btnRefresh *widget.Button
-	refresh := func() {
+	refresh := func(reportErrors bool) {
 		if refreshTimer != nil {
 			refreshTimer.Stop()
 		}
@@ -233,9 +233,11 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 				wsl.CDInvalidateContainersCache()
 				containers, err := wsl.ListContainers(true)
 				if err != nil {
-					safeUI(func() {
-						showErrorDialog(win, i18n.T("containers.refresh_error", localizedWslError(err)))
-					})
+					if reportErrors {
+						safeUI(func() {
+							showErrorDialog(win, i18n.T("containers.refresh_error", localizedWslError(err)))
+						})
+					}
 					return
 				}
 				data.setRows(containers)
@@ -365,7 +367,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		confirmDialog.Show()
 	}
 
-	btnRefresh = widget.NewButton(i18n.T("containers.refresh"), refresh)
+	btnRefresh = widget.NewButton(i18n.T("containers.refresh"), func() { refresh(true) })
 
 	topBar := container.NewBorder(
 		progressBar.Widget(),
@@ -717,7 +719,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		),
 	)
 
-	refresh()
+	refresh(false)
 
 	return withResponsiveScroll(container.NewBorder(topBar, nil, nil, nil, container.NewBorder(header, nil, nil, nil, containerList)))
 }
