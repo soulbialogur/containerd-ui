@@ -301,17 +301,14 @@ var (
 	appCtx      context.Context
 	appCancel   context.CancelFunc
 
-	cdMu      sync.Mutex
-	cdIPValid atomic.Bool
+	cdMu         sync.Mutex
+	cdIPValid    atomic.Bool
 	shutdownOnce sync.Once
 )
 
 func init() {
 	cdBaseCtx = namespaces.WithNamespace(context.Background(), GetCdNamespace())
 	appCtx, appCancel = context.WithCancel(context.Background())
-}
-
-func SetIdleDaemonThresholdForRuntime(minutes int) {
 }
 
 func DetectWSLIP() string {
@@ -457,7 +454,10 @@ func AppContext() context.Context {
 }
 
 func cdCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(cdBaseCtx, timeout)
+	cdMu.Lock()
+	baseCtx := cdBaseCtx
+	cdMu.Unlock()
+	return context.WithTimeout(baseCtx, timeout)
 }
 
 func CDCheck() error {
@@ -561,18 +561,6 @@ func CDGetStats() ([]ContainerStat, error) {
 		return nil, err
 	}
 	lines := strings.Split(out, "\n")
-	containerNames := make(map[string]string)
-	if namesOutput, namesErr := runRootNerdctl(context.Background(), "ps -a --format '{{json .}}'"); namesErr == nil {
-		for _, line := range strings.Split(namesOutput, "\n") {
-			var container struct {
-				ID   string `json:"ID"`
-				Name string `json:"Names"`
-			}
-			if json.Unmarshal([]byte(strings.TrimSpace(line)), &container) == nil && container.ID != "" {
-				containerNames[container.ID] = shortContainerName(container.Name)
-			}
-		}
-	}
 	var result []ContainerStat
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -591,20 +579,18 @@ func CDGetStats() ([]ContainerStat, error) {
 		if pids == "0" {
 			pids = "—"
 		}
+		name := strings.TrimSpace(stat.Name)
+		if name != "" {
+			name = shortContainerName(name)
+		}
 		result = append(result, ContainerStat{
 			ID:     id,
-			Name:   containerNames[stat.ID],
+			Name:   name,
 			CPU:    stat.CPUPerc,
 			Memory: stat.MemUsage,
 			NetIO:  stat.NetIO,
 			PIDs:   pids,
 		})
-		if result[len(result)-1].Name == "" {
-			result[len(result)-1].Name = stat.Name
-		}
-	}
-	if len(result) == 0 {
-		return result, nil
 	}
 	statsCache.Set(result)
 	return result, nil
@@ -1373,13 +1359,16 @@ func CDCleanSystem() (string, error) {
 			results = append(results, fmt.Sprintf("Удалено dangling-образов: %d", removedImg))
 		}
 	}
+	privilegePrefix := PrivilegePrefix()
 	out, _ := RunWSL(fmt.Sprintf(
 		"rm -rf /var/lib/nerdctl/%s/cache/* 2>/dev/null; "+
 			"rm -rf /var/lib/containerd/tmp/* 2>/dev/null; "+
-			"sudo find /var/log -name '*.log' -mtime +7 -delete 2>/dev/null; "+
-			"if command -v journalctl >/dev/null 2>&1; then sudo journalctl --vacuum-time=7d 2>/dev/null; fi; "+
+			"%sfind /var/log -name '*.log' -mtime +7 -delete 2>/dev/null; "+
+			"if command -v logrotate >/dev/null 2>&1 && [ -f /etc/logrotate.conf ]; then %slogrotate -s /run/logrotate.status /etc/logrotate.conf 2>/dev/null || true; fi; "+
 			"echo 'WSL_CLEANUP_DONE'",
 		GetCdNamespace(),
+		privilegePrefix,
+		privilegePrefix,
 	))
 	if strings.Contains(out, "WSL_CLEANUP_DONE") {
 		results = append(results, "Кэш, временные файлы и логи очищены")

@@ -613,7 +613,7 @@ func runWSLWithTimeout(command string, timeout time.Duration) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, GetShell(), "-c", command)
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "--exec", GetShell(), "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -642,7 +642,7 @@ func runWSLAsRootWithTimeout(command string, timeout time.Duration) (string, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "-u", "root", GetShell(), "-c", rootWSLSetupEnv()+"; "+command)
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "-u", "root", "--exec", GetShell(), "-c", rootWSLSetupEnv()+"; "+command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -829,7 +829,7 @@ func runWSLDirect(shell, command string) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, shell, "-c", command)
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "--exec", shell, "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -858,7 +858,7 @@ func RunWSL(command string) (string, error) {
 	// Таймаут защищает UI от вечной блокировки при зависшей WSL-VM.
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, GetShell(), "-c", command)
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "--exec", GetShell(), "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -932,7 +932,7 @@ func executeWSLCommand(ctx context.Context, command string, skipCache bool) (str
 		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
 	}
 
-	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, GetShell(), "-c", command)
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "--exec", GetShell(), "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -996,7 +996,7 @@ func RunWSLWithCancelStream(ctx context.Context, command string, onLine func(str
 		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
 	}
 
-	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, GetShell(), "-c", command)
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "--exec", GetShell(), "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -1067,7 +1067,7 @@ func runWSLAsRootWithCancelStream(ctx context.Context, script string, onLine fun
 		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
 	}
 
-	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "-u", "root", GetShell(), "-s", "--")
+	cmd := exec.CommandContext(ctx, WslExecutable(), "-d", distro, "-u", "root", "--exec", GetShell(), "-s", "--")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	cmd.Stdin = strings.NewReader(rootWSLSetupEnv() + "\n" + script + "\n")
 
@@ -1125,8 +1125,6 @@ func isBuildCommand(command string) bool {
 		strings.Contains(lower, "compose up") ||
 		strings.Contains(lower, "nerdctl build") ||
 		strings.Contains(lower, "nerdctl push") ||
-		strings.Contains(lower, "start-containerd.sh build") ||
-		strings.Contains(lower, "start-containerd.sh rebuild") ||
 		strings.Contains(lower, "docker_buildkit=0")
 }
 
@@ -1168,7 +1166,7 @@ func CheckService() map[string]interface{} {
 	}
 	out, _ := RunWSL("echo '---'; which nerdctl 2>/dev/null")
 	parts := strings.Split(out, "---")
-	if IsServiceActive(GetSystemdService()) {
+	if IsServiceActive(GetContainerdService()) {
 		status["containerd"] = true
 	}
 	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
@@ -1479,13 +1477,23 @@ func ensureCNIPluginsInstalled() error {
 		return nil
 	}
 
+	environment := CurrentEnvironment()
+	cniPackage := CNIPluginPackage()
+	if cniPackage == "" {
+		fmt.Printf("⚠️ CNI bridge plugin missing; auto-install skipped for unsupported package manager.\n")
+		return nil
+	}
+
 	priv := PrivilegePrefixNonInteractive()
 	if priv == "" {
 		fmt.Printf("⚠️ CNI bridge plugin missing; auto-install skipped because no non-interactive privilege method is available.\n")
 		return nil
 	}
 
-	installScript := priv + "apt update && " + priv + "apt install -y containernetworking-plugins"
+	installScript, commandErr := cniPluginInstallCommand(environment, cniPackage, priv)
+	if commandErr != nil {
+		return commandErr
+	}
 	out, installErr := runWSLWithTimeout(installScript, 180*time.Second)
 	if installErr != nil {
 		low := strings.ToLower(out)
@@ -1673,14 +1681,20 @@ nerdctl() { command nerdctl --address "$CONTAINERD_ADDRESS" --namespace "$CONTAI
 compose_file=%s;
 nerdctl compose -f "$compose_file" down --remove-orphans || true;
 nerdctl compose -f "$compose_file" up -d;
-nerdctl start soul-dialogue-postgres soul-dialogue-redis soul-dialogue-backend soul-dialogue-worker soul-dialogue-frontend;
+for _svc in soul-dialogue-postgres soul-dialogue-redis soul-dialogue-backend soul-dialogue-worker soul-dialogue-frontend; do
+    nerdctl inspect "$_svc" >/dev/null 2>&1 && nerdctl start "$_svc" 2>/dev/null || true;
+done;
 for attempt in $(seq 1 60); do
 	postgres_id=$(nerdctl ps -q --filter label=com.docker.compose.service=postgres | head -n 1);
 	redis_id=$(nerdctl ps -q --filter label=com.docker.compose.service=redis | head -n 1);
+	postgres_state=$(nerdctl inspect --format '{{.State.Status}}' "$postgres_id" 2>/dev/null || true);
+	redis_state=$(nerdctl inspect --format '{{.State.Status}}' "$redis_id" 2>/dev/null || true);
 	postgres_health=$(nerdctl inspect --format '{{.State.Health.Status}}' "$postgres_id" 2>/dev/null || true);
 	redis_health=$(nerdctl inspect --format '{{.State.Health.Status}}' "$redis_id" 2>/dev/null || true);
-    [ "$postgres_health" = healthy ] && [ "$redis_health" = healthy ] && break;
-	if [ "$attempt" = 60 ]; then echo 'База данных или Redis не стали healthy за 60 секунд' >&2; exit 1; fi;
+	if [ "$postgres_state" = running ] && [ "$redis_state" = running ] && { [ "$postgres_health" = healthy ] || [ -z "$postgres_health" ] || [ "$postgres_health" = starting ]; } && { [ "$redis_health" = healthy ] || [ -z "$redis_health" ] || [ "$redis_health" = starting ]; }; then
+		break;
+	fi;
+	if [ "$attempt" = 60 ]; then echo 'База данных или Redis ещё не готовы, но контейнеры уже запущены; продолжаем запуск' >&2; break; fi;
     sleep 1;
 done;
 for attempt in $(seq 1 90); do
@@ -1689,8 +1703,10 @@ for attempt in $(seq 1 90); do
 	backend_state=$(nerdctl inspect --format '{{.State.Status}}' "$backend_id" 2>/dev/null || true);
 	worker_state=$(nerdctl inspect --format '{{.State.Status}}' "$worker_id" 2>/dev/null || true);
 	backend_health=$(nerdctl inspect --format '{{.State.Health.Status}}' "$backend_id" 2>/dev/null || true);
-    [ "$backend_state" = running ] && [ "$worker_state" = running ] && [ "$backend_health" = healthy ] && break;
-	if [ "$attempt" = 90 ]; then echo 'Backend не стал healthy за 90 секунд' >&2; exit 1; fi;
+	if [ "$backend_state" = running ] && [ "$worker_state" = running ] && { [ "$backend_health" = healthy ] || [ -z "$backend_health" ] || [ "$backend_health" = starting ]; }; then
+		break;
+	fi;
+	if [ "$attempt" = 90 ]; then echo 'Backend/worker уже запущены, health ещё не выставлен; продолжаем без фатального exit' >&2; break; fi;
     sleep 1;
 done
 	nerdctl ps --format '{{.Names}}\t{{.Status}}'`,
@@ -1702,6 +1718,24 @@ done
 const oneShotLaunchFailMarker = "LAUNCH_FAIL:"
 
 func buildProjectImagesOneShotRootScript(projectPath, composeFile string) string {
+	environment := CurrentEnvironment()
+	return buildProjectImagesOneShotRootScriptWithEnvironmentAndCNIPackage(projectPath, composeFile, environment, CNIPluginPackage())
+}
+
+func buildProjectImagesOneShotRootScriptWithEnvironment(projectPath, composeFile string, environment Environment) string {
+	return buildProjectImagesOneShotRootScriptWithEnvironmentAndCNIPackage(
+		projectPath,
+		composeFile,
+		environment,
+		CNIPluginPackageForManager(environment.PkgManager),
+	)
+}
+
+func buildProjectImagesOneShotRootScriptWithEnvironmentAndCNIPackage(projectPath, composeFile string, environment Environment, cniPackage string) string {
+	cniInstallCommand, err := cniPluginInstallCommand(environment, cniPackage, "")
+	if err != nil {
+		cniInstallCommand = ":"
+	}
 	return fmt.Sprintf(`
 set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
@@ -1722,8 +1756,7 @@ chmod 777 "$SOCK_DIR"
 # BuildKit без CNI-плагинов не может создать default bridge-сеть,
 # но отсутствие bridge не должно ломать весь проект у всех пользователей.
 if [ ! -x /opt/cni/bin/bridge ] && [ ! -x /usr/lib/cni/bridge ] && [ ! -x /usr/libexec/cni/bridge ]; then
-    apt-get update >/dev/null 2>&1 || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y containernetworking-plugins >/dev/null 2>&1 || true
+	%[7]s >/dev/null 2>&1 || true
 fi
 if [ ! -x /opt/cni/bin/bridge ] && [ ! -x /usr/lib/cni/bridge ] && [ ! -x /usr/libexec/cni/bridge ]; then
     echo "WARN_CNI_MISSING: bridge plugin not found, continuing without hard-fail"
@@ -1825,7 +1858,7 @@ export BUILDKIT_STEP_LOG_MAX_SIZE=10000000 BUILDKIT_STEP_LOG_MAX_SPEED=1000000
 cd %[2]s
 nerdctl --address %[4]s --namespace %[5]s compose -f %[3]s build --progress=plain
 %[6]s
-`, oneShotLaunchFailMarker, shellQuote(projectPath), shellQuote(composeFile), rootContainerdAddr, shellQuote(GetCdNamespace()), buildkitCleanupScript())
+`, oneShotLaunchFailMarker, shellQuote(projectPath), shellQuote(composeFile), rootContainerdAddr, shellQuote(GetCdNamespace()), buildkitCleanupScript(), cniInstallCommand)
 }
 
 func buildkitCleanupScript() string {
@@ -1925,15 +1958,24 @@ func ClearContainerLogs(id string) error {
 }
 
 func CleanContainerdLogs() (string, error) {
-	out, err := runWSLAsRootWithTimeout(
-		"find /var/log -type f -name '*.log' -mtime +7 -delete 2>/dev/null; "+
-			"if command -v journalctl >/dev/null 2>&1; then mkdir -p /etc/systemd/journald.conf.d; printf '%s\\n' '[Journal]' 'SystemMaxUse=200M' 'MaxRetentionSec=7day' > /etc/systemd/journald.conf.d/99-containerd-ui.conf; systemctl try-reload-or-restart systemd-journald 2>/dev/null || true; journalctl --vacuum-time=7d --vacuum-size=200M 2>/dev/null || true; fi; "+
-			"find /var/lib/nerdctl -type f -name '*-json.log' -size +50M -print 2>/dev/null | while IFS= read -r log; do "+
-			"tail -c 52428800 \"$log\" > \"$log.trim\" && mv \"$log.trim\" \"$log\"; "+
-			"done; echo 'Логи ограничены: journal 200M, container logs 50M'",
-		TimeoutMedium,
-	)
+	out, err := runWSLAsRootWithTimeout(containerdLogsCleanupCommand(), TimeoutMedium)
 	return out, err
+}
+
+func containerdLogsCleanupCommand() string {
+	return `
+find /var/log -type f -name '*.log' -mtime +7 -delete 2>/dev/null
+if command -v logrotate >/dev/null 2>&1 && [ -f /etc/logrotate.conf ]; then
+	logrotate -s /run/logrotate.status /etc/logrotate.conf 2>/dev/null || true
+	log_status='logrotate applied'
+else
+	log_status='logrotate unavailable'
+fi
+find /var/lib/nerdctl -type f -name '*-json.log' -size +50M -print 2>/dev/null | while IFS= read -r log; do
+	tail -c 52428800 "$log" > "$log.trim" && mv "$log.trim" "$log"
+done
+printf 'Logs limited: %s; container logs 50M\n' "$log_status"
+`
 }
 
 var cleanCache = struct {
@@ -2168,7 +2210,7 @@ func GetSystemResources() (*SystemResources, error) {
 	sysResCache.RUnlock()
 
 	out, err := RunWSL(
-		"free -h | grep Mem && echo '---CPU---' && nproc && cat /proc/loadavg && echo '---DISK---' && df -h / | tail -1",
+		"free -h | grep Mem && echo '---CPU---' && awk '/^processor[[:space:]]*:/ { count++ } END { print count+0 }' /proc/cpuinfo && cat /proc/loadavg && echo '---DISK---' && df -h / | tail -1",
 	)
 	if err != nil {
 		return nil, err

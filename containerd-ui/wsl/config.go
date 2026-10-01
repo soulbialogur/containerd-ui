@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 )
 
 // ConfigPath возвращает путь к config.json рядом с exe.
@@ -71,7 +73,7 @@ type AppConfig struct {
 	CdNamespace                   string        `json:"cd_namespace"`
 	ScriptsPath                   string        `json:"scripts_path"`
 	DBVolumeName                  string        `json:"db_volume_name"`
-	SystemdService                string        `json:"systemd_service"`
+	ContainerdService             string        `json:"containerd_service"`
 	NerdctlPath                   string        `json:"nerdctl_path"`
 	LogTail                       int           `json:"log_tail"`
 	WslCacheTTL                   int           `json:"wsl_cache_ttl"`
@@ -80,7 +82,6 @@ type AppConfig struct {
 	VolumesCacheTTL               int           `json:"volumes_cache_ttl"`
 	AutoRefreshInterval           int           `json:"auto_refresh_interval"`
 	EconomyMode                   bool          `json:"economy_mode"`
-	IdleDaemonStopMinutes         int           `json:"idle_daemon_stop_minutes"`
 	SquashLayers                  bool          `json:"squash_layers"`
 	Compression                   string        `json:"compression"`
 	CompressionLevel              int           `json:"compression_level"`
@@ -128,7 +129,7 @@ func DefaultConfig() *AppConfig {
 		CdNamespace:                   "default",
 		ScriptsPath:                   "scripts/containerd",
 		DBVolumeName:                  "soul-dialogue-postgres-data",
-		SystemdService:                "containerd",
+		ContainerdService:             "containerd",
 		NerdctlPath:                   "",
 		LogTail:                       100,
 		WslCacheTTL:                   2,
@@ -137,7 +138,6 @@ func DefaultConfig() *AppConfig {
 		VolumesCacheTTL:               5,
 		AutoRefreshInterval:           3,
 		EconomyMode:                   false,
-		IdleDaemonStopMinutes:         2,
 		SquashLayers:                  false,
 		Compression:                   "zstd",
 		CompressionLevel:              6,
@@ -235,24 +235,34 @@ func IsWslDistroAvailable(name string) bool {
 	return false
 }
 
-// DetectWslDistro возвращает первый доступный WSL-дистрибутив.
-// Результат не кэшируется через sync.Once: WSL может быть запущен позже,
-// а список установленных дистрибутивов может измениться во время работы приложения.
+// GetDefaultWslDistroName задаёт единственный поддерживаемый runtime-дистрибутив.
+func GetDefaultWslDistroName() string {
+	return "Alpine"
+}
+
+// DetectWslDistro выбирает Alpine и не переключается на неподдерживаемые дистрибутивы.
 func DetectWslDistro() string {
 	distros := DetectWslDistros()
-	if len(distros) == 0 {
-		return ""
+	return detectWslDistroFromList(distros)
+}
+
+func detectWslDistroFromList(distros []string) string {
+	available := make([]string, 0, len(distros))
+	for _, distro := range distros {
+		distro = strings.TrimSpace(distro)
+		lower := strings.ToLower(distro)
+		if distro == "" || strings.HasPrefix(lower, "docker-desktop") || strings.HasPrefix(lower, "rancher-desktop") {
+			continue
+		}
+		available = append(available, distro)
 	}
 
-	// Для этого приложения Debian является предпочтительным дистрибутивом.
-	// Не выбираем случайно docker-desktop/Ubuntu, если Debian установлен.
-	for _, distro := range distros {
-		if strings.EqualFold(strings.TrimSpace(distro), "Debian") {
+	for _, distro := range available {
+		if strings.EqualFold(distro, GetDefaultWslDistroName()) {
 			return distro
 		}
 	}
-
-	return distros[0]
+	return ""
 }
 
 func LoadConfig() (*AppConfig, error) {
@@ -269,7 +279,7 @@ func LoadConfig() (*AppConfig, error) {
 
 	// Никогда не доверяем старому имени distro без проверки.
 	// Пользователь мог удалить/переименовать дистрибутив между запусками.
-	if !IsWslDistroAvailable(config.WslDistro) {
+	if !strings.EqualFold(config.WslDistro, GetDefaultWslDistroName()) || !IsWslDistroAvailable(config.WslDistro) {
 		if detected := DetectWslDistro(); detected != "" {
 			config.WslDistro = detected
 		} else {
@@ -288,17 +298,14 @@ func LoadConfig() (*AppConfig, error) {
 	if config.DBVolumeName == "" {
 		config.DBVolumeName = DefaultConfig().DBVolumeName
 	}
-	if config.SystemdService == "" {
-		config.SystemdService = DefaultConfig().SystemdService
+	if config.ContainerdService == "" {
+		config.ContainerdService = DefaultConfig().ContainerdService
 	}
 	if config.LogTail == 0 {
 		config.LogTail = DefaultConfig().LogTail
 	}
 	if config.WslCacheTTL == 0 {
 		config.WslCacheTTL = DefaultConfig().WslCacheTTL
-	}
-	if config.IdleDaemonStopMinutes <= 0 {
-		config.IdleDaemonStopMinutes = DefaultConfig().IdleDaemonStopMinutes
 	}
 	if config.ContainerOperationConcurrency <= 0 {
 		config.ContainerOperationConcurrency = DefaultConfig().ContainerOperationConcurrency
@@ -313,6 +320,9 @@ func LoadConfig() (*AppConfig, error) {
 }
 
 func SaveConfig(config *AppConfig) error {
+	if config == nil {
+		return fmt.Errorf("конфигурация не может быть nil")
+	}
 	path := ConfigPath()
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -321,7 +331,11 @@ func SaveConfig(config *AppConfig) error {
 	if dir := filepath.Dir(path); dir != "" {
 		os.MkdirAll(dir, 0755)
 	}
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	InitConfigCache(config)
+	return nil
 }
 
 func migrateLegacyProjectPath(config *AppConfig) {
@@ -721,15 +735,15 @@ func GetDBVolumeName() string {
 	return DefaultConfig().DBVolumeName
 }
 
-func GetSystemdService() string {
+func GetContainerdService() string {
 	configCache.RLock()
 	if configCache.config != nil {
-		svc := configCache.config.SystemdService
+		svc := configCache.config.ContainerdService
 		configCache.RUnlock()
 		return svc
 	}
 	configCache.RUnlock()
-	return DefaultConfig().SystemdService
+	return DefaultConfig().ContainerdService
 }
 
 func GetNerdctlPath() string {
@@ -748,7 +762,10 @@ func GetLogTail() int {
 	if configCache.config != nil {
 		tail := configCache.config.LogTail
 		configCache.RUnlock()
-		return tail
+		if tail > 0 {
+			return tail
+		}
+		return DefaultConfig().LogTail
 	}
 	configCache.RUnlock()
 	return DefaultConfig().LogTail
@@ -763,7 +780,10 @@ func GetAutoRefreshInterval() int {
 	if configCache.config != nil {
 		interval := configCache.config.AutoRefreshInterval
 		configCache.RUnlock()
-		return interval
+		if interval > 0 {
+			return interval
+		}
+		return DefaultConfig().AutoRefreshInterval
 	}
 	configCache.RUnlock()
 	return DefaultConfig().AutoRefreshInterval
@@ -1079,9 +1099,27 @@ func GetDeployServiceFrontendPort() int {
 }
 
 func InitConfigCache(config *AppConfig) {
+	if config == nil {
+		return
+	}
 	configCache.Lock()
+	previous := *DefaultConfig()
+	if configCache.config != nil {
+		previous = *configCache.config
+	}
 	configCache.config = config
 	configCache.Unlock()
+
+	cdMu.Lock()
+	cdBaseCtx = namespaces.WithNamespace(context.Background(), GetCdNamespace())
+	cdMu.Unlock()
+	if !strings.EqualFold(previous.WslDistro, config.WslDistro) ||
+		previous.CdPort != config.CdPort || previous.CdNamespace != config.CdNamespace {
+		if !strings.EqualFold(previous.WslDistro, config.WslDistro) {
+			cdIPValid.Store(false)
+		}
+		resetCDClient()
+	}
 	ApplyConfigToCaches(config)
 }
 
@@ -1091,9 +1129,6 @@ func ApplyConfigToCaches(config *AppConfig) {
 		return
 	}
 	wslCacheTTL.Store(int64(config.WslCacheTTL))
-	if config.IdleDaemonStopMinutes > 0 {
-		SetIdleDaemonThresholdForRuntime(config.IdleDaemonStopMinutes)
-	}
 	if config.MaxWSLCacheSize > 0 || config.WSLCacheCleanupAt > 0 {
 		wslCache.Lock()
 		if config.MaxWSLCacheSize > 0 {

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"text/template"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 var domainPattern = regexp.MustCompile(`^(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$`)
@@ -30,7 +32,7 @@ var dnsValidationCache = struct {
 }{entries: make(map[string]time.Time)}
 
 func validateRoutePrefix(prefix string) error {
-	if prefix == "" || prefix[0] != '/' || strings.ContainsAny(prefix, "` ?#\n\r;&|$()\\") {
+	if prefix == "" || prefix[0] != '/' || strings.ContainsAny(prefix, "`\"* ?#\n\r;&|$()\\") {
 		return fmt.Errorf("префикс backend должен начинаться с / и не содержать shell-метасимволы")
 	}
 	return nil
@@ -151,7 +153,7 @@ func DeployDomain(ctx context.Context, domain, backendPrefix string, publishBack
 			if !port443 {
 				busy = append(busy, "443")
 			}
-			return "", fmt.Errorf("порты %s заняты. Освободите их перед деплоем Traefik. Конфликт может быть в WSL или на Windows (например, IIS).\n\n💡 Проверить: кнопка «Проверить порты 80/443»\n💡 Остановить в WSL: sudo systemctl stop nginx apache2\n💡 Если порт занят Windows-службой, освободите его в Windows или выберите прокси Cloudflare Tunnel", strings.Join(busy, ", "))
+			return "", fmt.Errorf("порты %s заняты. Освободите их перед деплоем Traefik. Конфликт может быть в WSL или на Windows (например, IIS).\n\n💡 Проверить: кнопка «Проверить порты 80/443»\n💡 Остановить в WSL: doas rc-service nginx stop или doas rc-service apache2 stop\n💡 Если порт занят Windows-службой, освободите его в Windows или выберите прокси Cloudflare Tunnel", strings.Join(busy, ", "))
 		}
 	}
 
@@ -367,10 +369,13 @@ func deployWithCloudflare(ctx context.Context, projectPath, domain, backendPrefi
 }
 
 func CheckPorts(ctx context.Context) (port80, port443 bool, err error) {
-	command := "ss -tlnp 2>/dev/null | grep -E ':(80|443) ' || echo 'PORTS_FREE'"
+	command := checkPortsCommand()
 	output, err := RunWSLWithCancel(ctx, command)
 	if err != nil {
 		return false, false, err
+	}
+	if strings.TrimSpace(output) == "PORT_CHECK_UNAVAILABLE" {
+		return false, false, fmt.Errorf("не найдены утилиты проверки портов: ss или netstat")
 	}
 
 	port80 = true
@@ -401,6 +406,24 @@ func CheckPorts(ctx context.Context) (port80, port443 bool, err error) {
 	}
 
 	return port80, port443, nil
+}
+
+func checkPortsCommand() string {
+	return `
+if command -v ss >/dev/null 2>&1; then
+	listeners=$(ss -tlnp 2>/dev/null | grep -E ':(80|443)([[:space:]]|$)' || true)
+elif command -v netstat >/dev/null 2>&1; then
+	listeners=$(netstat -tln 2>/dev/null | grep -E ':(80|443)([[:space:]]|$)' || true)
+else
+	echo PORT_CHECK_UNAVAILABLE
+	exit 0
+fi
+if [ -n "$listeners" ]; then
+	printf '%s\\n' "$listeners"
+else
+	echo PORTS_FREE
+fi
+`
 }
 
 func isLocalPortOccupied(host string, port int) bool {
@@ -531,27 +554,89 @@ func ensureDeploymentNetwork(ctx context.Context) error {
 	return nil
 }
 
-func validateProjectComposeNetworkFromText(text string) error {
+func validateProjectComposeNetworkFromText(text string, serviceNames ...string) error {
 	networkName := GetDeployNetwork()
+	var compose struct {
+		Services map[string]struct {
+			Networks yaml.Node `yaml:"networks"`
+		} `yaml:"services"`
+		Networks map[string]struct {
+			External *bool  `yaml:"external"`
+			Name     string `yaml:"name"`
+		} `yaml:"networks"`
+	}
+	if err := yaml.Unmarshal([]byte(text), &compose); err != nil {
+		return fmt.Errorf("не удалось разобрать Compose YAML: %w", err)
+	}
 
-	if !strings.Contains(text, networkName) {
-		return fmt.Errorf("Compose-файл проекта не подключён к сети %q. Добавьте сеть %q и подключите backend/frontend к ней, иначе Traefik/Cloudflare не смогут обращаться к сервисам по имени.", networkName, networkName)
+	matchingNetworks := make(map[string]bool)
+	for key, definition := range compose.Networks {
+		actualName := strings.TrimSpace(definition.Name)
+		if actualName == "" {
+			actualName = key
+		}
+		if definition.External != nil && *definition.External && actualName == networkName {
+			matchingNetworks[key] = true
+		}
 	}
-	if !strings.Contains(text, "external: true") || !strings.Contains(text, "name: "+networkName) {
-		return fmt.Errorf("Compose-файл проекта должен объявлять сеть %q как external: true с name: %q. В противном случае Traefik/Cloudflare не увидят сервисы в общей сети.", networkName, networkName)
+	if len(matchingNetworks) == 0 {
+		return fmt.Errorf("Compose-файл должен объявлять сеть %q как external: true (имя сети может задаваться через name)", networkName)
 	}
-	if !strings.Contains(text, "- "+networkName) {
-		return fmt.Errorf("Compose-файл проекта должен подключать backend/frontend к сети %q. Например: networks: [\n  - %s\n]", networkName, networkName)
+
+	if len(serviceNames) == 0 {
+		for name := range compose.Services {
+			serviceNames = append(serviceNames, name)
+		}
+	}
+	if len(serviceNames) == 0 {
+		return fmt.Errorf("Compose-файл не содержит сервисов, подключённых к внешней сети %q", networkName)
+	}
+	for _, serviceName := range serviceNames {
+		service, ok := compose.Services[serviceName]
+		if !ok {
+			return fmt.Errorf("Compose-сервис %q не найден", serviceName)
+		}
+		if !serviceUsesComposeNetwork(&service.Networks, matchingNetworks) {
+			return fmt.Errorf("Compose-сервис %q не подключён к внешней сети %q", serviceName, networkName)
+		}
 	}
 	return nil
 }
 
-func validateProjectComposeNetwork(composePath string) error {
+func serviceUsesComposeNetwork(node *yaml.Node, networkNames map[string]bool) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			return false
+		}
+		node = node.Content[0]
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		for _, item := range node.Content {
+			if item.Kind == yaml.ScalarNode && networkNames[item.Value] {
+				return true
+			}
+		}
+	case yaml.MappingNode:
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			key := node.Content[index]
+			if key.Kind == yaml.ScalarNode && networkNames[key.Value] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func validateProjectComposeNetwork(composePath string, serviceNames ...string) error {
 	content, err := os.ReadFile(composePath)
 	if err != nil {
 		return fmt.Errorf("не удалось прочитать Compose-файл проекта: %w", err)
 	}
-	return validateProjectComposeNetworkFromText(string(content))
+	return validateProjectComposeNetworkFromText(string(content), serviceNames...)
 }
 
 func ensureDeploymentServices(ctx context.Context, projectPath string, backend, frontend bool) (string, error) {
@@ -567,7 +652,7 @@ func ensureDeploymentServices(ctx context.Context, projectPath string, backend, 
 	if err != nil {
 		return "", err
 	}
-	if err := validateProjectComposeNetwork(composePath); err != nil {
+	if err := validateProjectComposeNetwork(composePath, services...); err != nil {
 		return "", err
 	}
 	command := fmt.Sprintf(
@@ -723,12 +808,12 @@ const traefikCompose = `services:
     volumes:
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/acme.json:/etc/traefik/acme.json
-		networks:
-			- {{ .Network }}
+    networks:
+      - {{ .Network }}
 networks:
-	{{ .Network }}:
+  {{ .Network }}:
     external: true
-		name: {{ .Network }}
+    name: {{ .Network }}
 `
 
 func renderCloudflareConfig(domain, backendPrefix string, backend, frontend bool) (string, error) {
@@ -814,15 +899,15 @@ func RollbackDomain(ctx context.Context) (string, error) {
 
 const cloudflareConfigTemplate = `{
   "ingress": [
-    {{ if .Frontend }}{
-      "hostname": "{{ .Domain }}",
-      "service": "http://{{ .FrontendService }}:{{ .FrontendPort }}"
-    },{{ end }}
     {{ if .Backend }}{
       "hostname": "{{ .Domain }}",
       "path": "{{ .BackendPrefix }}*",
       "service": "http://{{ .BackendService }}:{{ .BackendPort }}"
     },{{ end }}
+		{{ if .Frontend }}{
+			"hostname": "{{ .Domain }}",
+			"service": "http://{{ .FrontendService }}:{{ .FrontendPort }}"
+		},{{ end }}
     {
       "service": "http_status:404"
     }
@@ -844,10 +929,10 @@ const cloudflareComposeTemplate = `services:
     volumes:
       - ./cloudflare/config.json:/etc/cloudflare/config.json:ro
       - ./cloudflare/credentials.json:/etc/cloudflare/credentials.json:ro
-		networks:
-			- {{ .Network }}
+    networks:
+      - {{ .Network }}
 networks:
-	{{ .Network }}:
+  {{ .Network }}:
     external: true
-		name: {{ .Network }}
+    name: {{ .Network }}
 `

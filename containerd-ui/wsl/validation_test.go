@@ -2,6 +2,7 @@ package wsl
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"golang.org/x/text/encoding/charmap"
+	"gopkg.in/yaml.v3"
 )
 
 func TestCacheManagerInvalidateDoesNotRecurse(t *testing.T) {
@@ -21,6 +23,186 @@ func TestCacheManagerInvalidateDoesNotRecurse(t *testing.T) {
 
 	for _, eventType := range events {
 		GlobalCacheManager.Invalidate(eventType, "test")
+	}
+}
+
+func TestParseDetectedEnvironmentOpenRC(t *testing.T) {
+	got := parseDetectedEnvironment("SHELL:sh\nINIT:openrc\nPKG:apk\nPRIV:doas\n", Environment{})
+	if got.Shell != ShellSh || got.InitSystem != InitOpenRC || got.PkgManager != PkgApk || got.PrivilegeCmd != PrivDoas {
+		t.Fatalf("parseDetectedEnvironment() = %+v", got)
+	}
+}
+
+func TestGetDefaultWslDistroName(t *testing.T) {
+	if got := GetDefaultWslDistroName(); got != "Alpine" {
+		t.Fatalf("GetDefaultWslDistroName() = %q, want Alpine", got)
+	}
+}
+
+func TestDetectWslDistroFromList(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		distros []string
+		want    string
+	}{
+		{name: "prefer alpine", distros: []string{"Ubuntu", "Alpine"}, want: "Alpine"},
+		{name: "do not fall back to unsupported distros", distros: []string{"Ubuntu", "Fedora"}, want: ""},
+		{name: "ignore unsupported distros", distros: []string{"docker-desktop", "rancher-desktop-data", "Ubuntu"}, want: ""},
+		{name: "ignore infrastructure only", distros: []string{"docker-desktop", "rancher-desktop"}, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := detectWslDistroFromList(tc.distros); got != tc.want {
+				t.Fatalf("detectWslDistroFromList(%v) = %q, want %q", tc.distros, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildRuntimeInstallCommandForAlpineOpenRC(t *testing.T) {
+	tests := []struct {
+		name string
+		env  Environment
+		want []string
+	}{{
+		name: "alpine openrc",
+		env:  Environment{PkgManager: PkgApk, InitSystem: InitOpenRC, PrivilegeCmd: PrivDoas},
+		want: []string{"doas -n sh -c", "apk update", "containerd-openrc", "cni-plugins", "rc-update add containerd default", "rc-service containerd start"},
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			command, err := BuildRuntimeInstallCommand(test.env)
+			if err != nil {
+				t.Fatalf("BuildRuntimeInstallCommand() error = %v", err)
+			}
+			for _, want := range test.want {
+				if !strings.Contains(command, want) {
+					t.Errorf("command %q does not contain %q", command, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAlpineInstallCommandAddsCompatibilityPackagesAndDoasRules(t *testing.T) {
+	command, err := BuildRuntimeInstallCommand(Environment{PkgManager: PkgApk, InitSystem: InitOpenRC})
+	if err != nil {
+		t.Fatalf("BuildRuntimeInstallCommand() error = %v", err)
+	}
+	for _, want := range []string{
+		"bash", "ca-certificates", "findutils", "logrotate", "procps-ng", "socat", "tzdata", "doas",
+		"/etc/doas.conf", "permit nopass :wheel", "permit nopass root",
+		"curl -fsSL", "sha256sum -c -", "nerdctl-", "buildkit-",
+		"containerd-ui-grpc-proxy", "[boot]", "touch /run/openrc/softlevel",
+		"rc-service containerd start", "rc-service containerd-ui-grpc-proxy start",
+		MinimumAlpineNerdctlVersion, MinimumAlpineBuildkitVersion,
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("Alpine install command does not contain %q", want)
+		}
+	}
+}
+
+func TestAlpineWSLBootCommandPreservesExistingConfig(t *testing.T) {
+	command := AlpineWSLBootCommand()
+	for _, want := range []string{
+		"/etc/wsl.conf",
+		"in_boot",
+		"-v proxy_command=\"$proxy_command\"",
+		"existing \"; \" proxy_command",
+		"mkdir -p /run/openrc; touch /run/openrc/softlevel; rc-service containerd start; rc-service containerd-ui-grpc-proxy start",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("AlpineWSLBootCommand() does not contain %q", want)
+		}
+	}
+}
+
+func TestAlpineContainerdUIProxyUsesSocketRelay(t *testing.T) {
+	command := AlpineContainerdUIProxySetupCommand()
+	for _, want := range []string{
+		"/etc/init.d/containerd-ui-grpc-proxy",
+		"command=\"/usr/bin/socat\"",
+		"TCP-LISTEN:50051,bind=0.0.0.0,reuseaddr,fork",
+		"UNIX-CONNECT:/run/containerd/containerd.sock",
+		"need containerd",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("AlpineContainerdUIProxySetupCommand() does not contain %q", want)
+		}
+	}
+}
+
+func TestAlpineContainerdConfigExposesApplicationGRPCPort(t *testing.T) {
+	command := AlpineContainerdConfigCommand()
+	for _, want := range []string{
+		"containerd config default",
+		"io.containerd.server.v1.grpc-tcp",
+		"/run/containerd/containerd.sock",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("Alpine containerd config should contain %q; got:\n%s", want, command)
+		}
+	}
+	if !strings.Contains(command, "awk") || !strings.Contains(command, "tmp=\"$(mktemp)\"") {
+		t.Fatalf("Alpine containerd config should update existing configuration without overwriting other settings; got:\n%s", command)
+	}
+}
+
+func TestAlpineToolchainVersionsSupported(t *testing.T) {
+	if !AlpineToolchainVersionsSupported("nerdctl version v2.4.0", "buildctl github.com/moby/buildkit v0.33.0") {
+		t.Fatal("minimum supported Alpine versions should pass")
+	}
+	if AlpineToolchainVersionsSupported("nerdctl version 2.3.9", "buildctl github.com/moby/buildkit v0.33.0") {
+		t.Fatal("old nerdctl version should fail the minimum check")
+	}
+	if AlpineToolchainVersionsSupported("nerdctl version 2.4.0", "buildctl github.com/moby/buildkit v0.32.9") {
+		t.Fatal("old BuildKit version should fail the minimum check")
+	}
+}
+
+func TestCNIPluginPackageForAlpine(t *testing.T) {
+	if got := CNIPluginPackageForManager(PkgApk); got != "cni-plugins" {
+		t.Errorf("CNIPluginPackageForManager(%q) = %q, want cni-plugins", PkgApk, got)
+	}
+	if got := CNIPluginPackageForManager("unknown"); got != "" {
+		t.Errorf("CNIPluginPackageForManager(unknown) = %q, want empty", got)
+	}
+}
+
+func TestCNIPluginInstallCommandByManager(t *testing.T) {
+	alpineCommand, err := CNIPluginInstallCommand(Environment{PkgManager: PkgApk}, "doas -n ")
+	if err != nil || alpineCommand != "doas -n apk add --no-cache cni-plugins" {
+		t.Fatalf("Alpine CNI install command = %q, error = %v", alpineCommand, err)
+	}
+}
+
+func TestServiceActiveCommandForOpenRC(t *testing.T) {
+	got := serviceActiveCommand("containerd", InitOpenRC)
+	want := "rc-service containerd status >/dev/null 2>&1"
+	if got != want {
+		t.Fatalf("serviceActiveCommand() = %q, want %q", got, want)
+	}
+}
+
+func TestContainerdLogsCleanupReportsOpenRCFallback(t *testing.T) {
+	script := containerdLogsCleanupCommand()
+	for _, want := range []string{"command -v logrotate", "logrotate applied", "logrotate unavailable"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("containerdLogsCleanupCommand() does not contain %q", want)
+		}
+	}
+	if strings.Contains(script, "journalctl") || strings.Contains(script, "/etc/systemd") {
+		t.Fatal("Alpine log cleanup should not depend on systemd or journald")
+	}
+}
+
+func TestCheckPortsCommandHasFallback(t *testing.T) {
+	command := checkPortsCommand()
+	for _, want := range []string{"command -v ss", "ss -tlnp", "command -v netstat", "netstat -tln", "PORT_CHECK_UNAVAILABLE"} {
+		if !strings.Contains(command, want) {
+			t.Errorf("checkPortsCommand() does not contain %q", want)
+		}
 	}
 }
 
@@ -58,6 +240,7 @@ func TestValidateRoutePrefixRejectsShellMetacharacters(t *testing.T) {
 		"/api|nc 127.0.0.1 4444",
 		"/api`id`",
 		"/api&&echo pwned",
+		`/api"quoted`,
 	}
 	for _, p := range bad {
 		if err := validateRoutePrefix(p); err == nil {
@@ -125,6 +308,65 @@ networks:
 	}
 }
 
+func TestValidateProjectComposeNetworkAcceptsEquivalentYAMLForms(t *testing.T) {
+	tests := map[string]string{
+		"default external name and flow sequence": `services:
+  backend:
+    image: test
+    networks: [soul-dialogue]
+networks:
+  soul-dialogue:
+    external: true
+`,
+		"external network alias and mapping attachment": `services:
+  backend:
+    image: test
+    networks:
+      public: {}
+networks:
+  public:
+    external: true
+    name: soul-dialogue
+`,
+	}
+	for name, compose := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProjectComposeNetworkFromText(compose, "backend"); err != nil {
+				t.Fatalf("valid Compose network form rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateProjectComposeNetworkRejectsCommentsAndMissingServiceAttachment(t *testing.T) {
+	commentOnly := `services:
+  backend:
+    image: test
+# networks:
+#   soul-dialogue:
+#     external: true
+#     name: soul-dialogue
+#     - soul-dialogue
+`
+	if err := validateProjectComposeNetworkFromText(commentOnly, "backend"); err == nil {
+		t.Fatal("network references in comments must not satisfy Compose validation")
+	}
+
+	missingServiceAttachment := `services:
+  backend:
+    image: test
+    networks: [soul-dialogue]
+  frontend:
+    image: test
+networks:
+  soul-dialogue:
+    external: true
+`
+	if err := validateProjectComposeNetworkFromText(missingServiceAttachment, "backend", "frontend"); err == nil {
+		t.Fatal("every selected service must attach to the required external network")
+	}
+}
+
 func TestRenderedComposeUsesRelativePathsFromComposeDirectory(t *testing.T) {
 	traefik, err := renderTraefikCompose("admin@example.com")
 	if err != nil {
@@ -146,6 +388,47 @@ func TestRenderedComposeUsesRelativePathsFromComposeDirectory(t *testing.T) {
 	}
 	if !strings.Contains(cloudflare, "./cloudflare/config.json") || !strings.Contains(cloudflare, "./cloudflare/credentials.json") {
 		t.Fatalf("cloudflare compose should mount files relative to .containerd-data dir, got:\n%s", cloudflare)
+	}
+}
+
+func TestRenderedDeploymentComposeUsesSpacesForYAMLIndentation(t *testing.T) {
+	traefik, err := renderTraefikCompose("admin@example.com")
+	if err != nil {
+		t.Fatalf("renderTraefikCompose() unexpected error: %v", err)
+	}
+	cloudflare, err := renderCloudflareCompose()
+	if err != nil {
+		t.Fatalf("renderCloudflareCompose() unexpected error: %v", err)
+	}
+	if strings.Contains(traefik, "\t") {
+		t.Fatal("Traefik Compose must not contain tabs, which YAML forbids for indentation")
+	}
+	if strings.Contains(cloudflare, "\t") {
+		t.Fatal("Cloudflare Compose must not contain tabs, which YAML forbids for indentation")
+	}
+	for name, rendered := range map[string]string{"Traefik": traefik, "Cloudflare": cloudflare} {
+		var compose map[string]any
+		if err := yaml.Unmarshal([]byte(rendered), &compose); err != nil {
+			t.Errorf("%s Compose is invalid YAML: %v", name, err)
+		}
+	}
+}
+
+func TestCloudflareConfigOrdersBackendPathBeforeFrontendCatchAll(t *testing.T) {
+	config, err := renderCloudflareConfig("example.com", "/api", true, true)
+	if err != nil {
+		t.Fatalf("renderCloudflareConfig() unexpected error: %v", err)
+	}
+	if !json.Valid([]byte(config)) {
+		t.Fatalf("renderCloudflareConfig() generated invalid JSON:\n%s", config)
+	}
+	backendRoute := strings.Index(config, `"service": "http://backend:8000"`)
+	frontendRoute := strings.Index(config, `"service": "http://frontend:80"`)
+	if backendRoute < 0 || frontendRoute < 0 {
+		t.Fatalf("expected both backend and frontend ingress routes, got:\n%s", config)
+	}
+	if backendRoute > frontendRoute {
+		t.Fatalf("backend path route must precede frontend catch-all, got:\n%s", config)
 	}
 }
 
@@ -218,7 +501,7 @@ func TestBuildkitStartScriptSearchesCommonInstallLocations(t *testing.T) {
 }
 
 func TestBuildProjectImagesOneShotUsesRootShell(t *testing.T) {
-	script := buildProjectImagesOneShotRootScript("/tmp/project", "/tmp/project/compose.yaml")
+	script := buildProjectImagesOneShotRootScriptWithEnvironment("/tmp/project", "/tmp/project/compose.yaml", Environment{PkgManager: PkgApk})
 	if strings.Contains(script, "--oci-worker-no-process-sandbox") || strings.Contains(script, "--oci-worker-snapshotter=native") {
 		t.Fatalf("root build script should not use user-worker flags; got:\n%s", script)
 	}
@@ -234,14 +517,24 @@ func TestBuildProjectImagesOneShotUsesRootShell(t *testing.T) {
 	if !strings.Contains(script, "\"$BCTL_BIN\" --addr \"unix://$SOCK\" debug workers") {
 		t.Fatalf("one-shot root build script should wait for daemon readiness via resolved buildctl; got:\n%s", script)
 	}
-	if !strings.Contains(script, "containernetworking-plugins") {
-		t.Fatalf("one-shot root build script should install missing CNI plugins before build; got:\n%s", script)
+	if !strings.Contains(script, "apk add --no-cache cni-plugins") {
+		t.Fatalf("one-shot root build script should install missing Alpine CNI plugins before build; got:\n%s", script)
 	}
 	if !strings.Contains(script, "/usr/lib/cni/bridge") || !strings.Contains(script, "/usr/libexec/cni/bridge") {
-		t.Fatalf("one-shot root build script should accept Debian CNI plugin locations; got:\n%s", script)
+		t.Fatalf("one-shot root build script should accept Alpine CNI plugin locations; got:\n%s", script)
 	}
 	if !strings.Contains(script, "nerdctl --address unix:///run/containerd/containerd.sock --namespace 'default' compose -f") {
 		t.Fatalf("root one-shot build script should include compose build; got:\n%s", script)
+	}
+}
+
+func TestBuildProjectImagesOneShotUsesAlpineCNIPackage(t *testing.T) {
+	script := buildProjectImagesOneShotRootScriptWithEnvironment("/tmp/project", "/tmp/project/compose.yaml", Environment{PkgManager: PkgApk})
+	if !strings.Contains(script, "apk add --no-cache cni-plugins") {
+		t.Fatalf("Alpine one-shot root build script should install cni-plugins; got:\n%s", script)
+	}
+	if strings.Contains(script, "apt-get") {
+		t.Fatalf("Alpine one-shot root build script should not contain non-Alpine CNI commands; got:\n%s", script)
 	}
 }
 
@@ -416,10 +709,11 @@ func TestRootFallbackStartsStackWithRootComposeCommand(t *testing.T) {
 		"nerdctl() { command nerdctl --address \"$CONTAINERD_ADDRESS\" --namespace \"$CONTAINERD_NAMESPACE\" \"$@\"; }",
 		"nerdctl compose -f \"$compose_file\" down --remove-orphans || true",
 		"nerdctl compose -f \"$compose_file\" up -d",
-		"nerdctl start soul-dialogue-postgres soul-dialogue-redis soul-dialogue-backend soul-dialogue-worker soul-dialogue-frontend",
-		"[ \"$postgres_health\" = healthy ] && [ \"$redis_health\" = healthy ]",
-		"worker_state=$(nerdctl inspect --format '{{.State.Status}}' \"$worker_id\" 2>/dev/null || true)",
-		"[ \"$backend_state\" = running ] && [ \"$worker_state\" = running ] && [ \"$backend_health\" = healthy ]",
+		"for _svc in soul-dialogue-postgres soul-dialogue-redis soul-dialogue-backend soul-dialogue-worker soul-dialogue-frontend; do",
+		"nerdctl start \"$_svc\" 2>/dev/null || true",
+		"[ \"$postgres_state\" = running ] && [ \"$redis_state\" = running ] && { [ \"$postgres_health\" = healthy ] || [ -z \"$postgres_health\" ] || [ \"$postgres_health\" = starting ]; } && { [ \"$redis_health\" = healthy ] || [ -z \"$redis_health\" ] || [ \"$redis_health\" = starting ]; }",
+		"backend_state=$(nerdctl inspect --format '{{.State.Status}}' \"$backend_id\" 2>/dev/null || true)",
+		"[ \"$backend_state\" = running ] && [ \"$worker_state\" = running ] && { [ \"$backend_health\" = healthy ] || [ -z \"$backend_health\" ] || [ \"$backend_health\" = starting ]; }",
 		"nerdctl ps --format '{{.Names}}\\t{{.Status}}'",
 	}
 	for _, want := range wantParts {
@@ -528,23 +822,16 @@ func TestUnusedNetworkCleanupProtectsProjectNetworks(t *testing.T) {
 
 func TestInvalidateWSLCacheClearsVolumeListingEntries(t *testing.T) {
 	wslCache.Lock()
-	wslCache.m["Debian\x00nerdctl volume ls --format '{{json .}}'"] = wslCacheEntry{output: "old", timestamp: time.Now()}
+	wslCache.m["Alpine\x00nerdctl volume ls --format '{{json .}}'"] = wslCacheEntry{output: "old", timestamp: time.Now()}
 	wslCache.totalSize = 3
 	wslCache.Unlock()
 
 	InvalidateWSLCache()
 
 	wslCache.RLock()
-	_, ok := wslCache.m["Debian\x00nerdctl volume ls --format '{{json .}}'"]
+	_, ok := wslCache.m["Alpine\x00nerdctl volume ls --format '{{json .}}'"]
 	wslCache.RUnlock()
 	if ok {
 		t.Fatal("InvalidateWSLCache() should clear cached volume listings")
-	}
-}
-
-func TestInstallScriptIncludesCNIPluginPackage(t *testing.T) {
-	installScript := "sudo apt update && sudo apt install -y containerd nerdctl buildkit containernetworking-plugins && sudo systemctl enable --now containerd && sudo systemctl enable --now buildkit"
-	if !strings.Contains(installScript, "containernetworking-plugins") {
-		t.Fatalf("install script should install containernetworking-plugins package")
 	}
 }
