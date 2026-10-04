@@ -4,23 +4,21 @@
 
 - Windows 10/11
 - WSL2
-- Debian inside WSL2
+- the bundled `Alpine-ContainerdUI` distribution inside WSL2
 - access to PowerShell
 - permission to install packages in WSL
-- Go 1.26.5 or newer — required to build the application from source
-- MinGW-w64 — required for the Windows CGO cross-build
+- Go 1.26.5 or newer inside Alpine — required to build the application from source (included in the bundled image)
+- MinGW-w64 inside Alpine — required for the Windows CGO cross-build (included in the bundled image)
 
 ## Runtime Stack
 
-This guide targets Debian in WSL2. The application expects Debian's `systemd` and `apt` tools when it checks services and installs packages. You can override detected values in `config.json`, but Alpine/OpenRC is not the documented deployment path.
+The only supported runtime is the bundled `Alpine-ContainerdUI` WSL distribution. The application automatically migrates old `Alpine` selections to the bundled distro when it is installed.
 
 ## Install WSL
 
-### Debian (Recommended)
+### Alpine-ContainerdUI (Required)
 
-```powershell
-wsl --install Debian
-```
+Run `Alpine-ContainerdUI-Setup.exe` to import the bundled offline image into WSL2. This image provides OpenRC, containerd, nerdctl, BuildKit, Go, MinGW-w64, and OpenGL development files.
 
 Verify it:
 
@@ -34,46 +32,46 @@ For the complete list of verification commands and scenarios, see [diagnostics.m
 
 If anything is missing, install or start the services manually, then check their status again using the diagnostics guide.
 
-## Install containerd and nerdctl
+## Verify containerd and nerdctl
 
-### Debian
+The bundled image already contains these components:
 
-```bash
-sudo apt update
-sudo apt install -y containerd nerdctl
+```powershell
+wsl -d Alpine-ContainerdUI -- nerdctl version
+wsl -d Alpine-ContainerdUI -- nerdctl info
+wsl -d Alpine-ContainerdUI -- rc-service containerd status
 ```
 
-After installation, verify them:
+## Verify BuildKit
+
+```powershell
+wsl -d Alpine-ContainerdUI -- buildctl --version
+wsl -d Alpine-ContainerdUI -- buildkitd --version
+```
+
+If you intentionally removed or modified packages in the image, install them from Alpine:
 
 ```bash
+apk add --no-cache containerd containerd-openrc nerdctl buildkit cni-plugins doas socat
 nerdctl version
 nerdctl info
-```
-
-## Install and Start BuildKit
-
-BuildKit is required to build images in the application.
-
-### Debian
-
-```bash
-sudo apt install -y buildkit
-sudo systemctl enable --now buildkit || true
 buildctl --version
 buildkitd --version
 ```
 
-The Debian package may not provide an enabled `buildkit` systemd unit on every installation. The application can start `buildkitd` automatically when a build begins if the daemon is installed but not already running. The complete set of verification commands and startup/error scenarios is available in [diagnostics.md](diagnostics.md). If the daemon will not start or keeps failing, also see [troubleshooting.md](troubleshooting.md).
+The application starts `buildkitd` on demand when a build begins; it is not enabled as a persistent OpenRC service. Verification and startup checks are available in [diagnostics.md](diagnostics.md) and [troubleshooting.md](troubleshooting.md).
 
 ## Start containerd
 
-### Debian
+### Alpine
 
 ```bash
-sudo systemctl enable containerd
-sudo systemctl start containerd
-sudo systemctl status containerd
+rc-update add containerd default
+rc-service containerd start
+rc-service containerd status
 ```
+
+The application installer also configures the standard Unix socket, creates the OpenRC `containerd-ui-grpc-proxy` service that forwards TCP port `50051` to that socket, and adds an OpenRC bootstrap command to `/etc/wsl.conf`. These are required for the Windows UI to reach the Containerd management API after WSL starts. Prefer **Install all components** in the Status tab to configure them automatically.
 
 ## Install Cloudflare Tunnel
 
@@ -101,11 +99,11 @@ For quick environment checks and commands, see [diagnostics.md](diagnostics.md).
 
 ## Recommended Environment Layout
 
-### Debian
+### Alpine-ContainerdUI
 
 ```text
 Windows
-└── WSL Debian
+└── WSL Alpine-ContainerdUI
     ├── containerd
     ├── nerdctl
     ├── buildkitd
@@ -115,23 +113,33 @@ Windows
 
 ## Build the Windows Application from Source
 
-Run the build from PowerShell through the Debian WSL environment:
+The script runs `go mod tidy`, then cross-compiles a Windows `amd64` executable with `CGO_ENABLED=1` using the bundled Go and MinGW toolchain. Start the bundled distribution from PowerShell, then run the script in its shell:
 
 ```powershell
-cd "C:\Users\User\OneDrive\Desktop\ai-chatbot-website"
-bash containerd-ui/build.sh
+wsl -d Alpine-ContainerdUI
 ```
 
-The script runs `go mod tidy`, installs MinGW packages when needed, and cross-compiles a Windows `amd64` executable with `CGO_ENABLED=1`. The output is `containerd-ui/containerd-ui.exe`.
+```bash
+cd /mnt/c/Users/User/OneDrive/Desktop/ai-chatbot-website
+sh containerd-ui/build.sh
+```
 
-To install the build dependencies manually inside Debian:
+The output is `containerd-ui/dist/containerd-ui.exe`. The application icon is embedded in the executable, so no separate `app.ico` file is needed beside it. To verify the bundled toolchain:
 
 ```bash
-sudo apt update
-sudo apt install -y golang gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
 go version
 x86_64-w64-mingw32-gcc --version
 ```
+
+## Build the Offline WSL Runtime Installer
+
+From PowerShell in this directory, run:
+
+```powershell
+.\build-offline-installer.ps1
+```
+
+The script downloads an official Alpine minirootfs, provisions OpenRC, containerd, nerdctl, BuildKit, CNI plugins, Go, MinGW-w64, and Mesa/OpenGL development files in a temporary WSL distro, then packages the exported image into `dist\Alpine-ContainerdUI-Setup.exe`. Building requires internet access, WSL2, and Go. The resulting installer does not download runtime packages: it imports the bundled image as `Alpine-ContainerdUI` and refuses to overwrite an existing distro with that name. The app automatically selects the bundled runtime. MinGW's Windows OpenGL headers and `opengl32` cross-link are checked during image creation.
 
 ## How the Application Accesses Containers
 

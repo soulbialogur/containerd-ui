@@ -2,6 +2,8 @@
 
 This is a concise guide to the application, organized by task so you can quickly find the instructions you need.
 
+The current application release is stable for regular use with the supported environment documented in [Environment Setup](installation.md).
+
 ## Sections
 
 - [Quickstart](quickstart.md) — get the application running from scratch.

@@ -18,12 +18,12 @@ Example configuration file:
 ```json
 {
   "project_path": "C:\\Users\\User\\OneDrive\\Desktop\\project",
-  "wsl_distro": "Debian",
+  "wsl_distro": "Alpine-ContainerdUI",
   "cd_port": 50051,
   "cd_namespace": "default",
   "scripts_path": "scripts/containerd",
   "db_volume_name": "my-project-postgres-data",
-  "systemd_service": "containerd",
+  "containerd_service": "containerd",
   "nerdctl_path": "",
   "log_tail": 100,
   "wsl_cache_ttl": 2,
@@ -60,16 +60,16 @@ Example configuration file:
 | Field | Description | Default |
 |---|---|---:|
 | `project_path` | Path to the project root containing `compose.yaml` or `docker-compose.yml` | `""` |
-| `wsl_distro` | WSL distribution where Linux commands run | `Debian` |
+| `wsl_distro` | Supported WSL runtime distribution | `Alpine-ContainerdUI` |
 | `shell` | Shell for executing commands in WSL (`bash` or `sh`) | `""` (auto-detect) |
-| `init_system` | Init system for service management (`systemd`, `openrc`, or `none`) | `""` (auto-detect) |
-| `pkg_manager` | Package manager for install commands (`apt` or `apk`) | `""` (auto-detect) |
-| `privilege_cmd` | Command for privilege escalation (`sudo` or `doas`) | `""` (auto-detect) |
+| `init_system` | Init system for service management (`openrc` or `none`) | `""` (auto-detect) |
+| `pkg_manager` | Package manager for install commands (`apk`) | `""` (auto-detect) |
+| `privilege_cmd` | Command for privilege escalation (`doas`) | `""` (auto-detect) |
 | `cd_port` | gRPC port for the container runtime (`containerd`) | `50051` |
 | `cd_namespace` | Namespace for the containerd API | `default` |
 | `scripts_path` | Subdirectory containing container operation scripts | `scripts/containerd` |
 | `db_volume_name` | PostgreSQL volume name shown in the Database tab | `""` |
-| `systemd_service` | systemd service name for the container environment | `containerd` |
+| `containerd_service` | OpenRC service name for the container runtime | `containerd` |
 | `nerdctl_path` | Path to `nerdctl`; if empty, `PATH` is used | `""` |
 | `log_tail` | Number of log lines shown in the UI | `100` |
 | `wsl_cache_ttl` | WSL command cache lifetime in seconds | `2` |
@@ -81,8 +81,8 @@ Example configuration file:
 | `squash_layers` | Squash layers during builds with `--squash` | `false` |
 | `compression` | Compression type (`gzip`, `zstd`, `none`) | `zstd` |
 | `compression_level` | Compression level from 1 to 9 | `6` |
-| `max_wsl_cache_size` | Maximum WSL cache size in bytes | `10485760` |
-| `wsl_cache_cleanup_at` | Cache cleanup threshold by entry count | `25` |
+| `max_wsl_cache_size` | Maximum WSL cache size in bytes; `0` disables the cache | `10485760` |
+| `wsl_cache_cleanup_at` | Cache entry limit; `0` disables the count limit | `25` |
 | `default_cpu_limit` | CPU limit for new containers, for example `"0.5"`; applies when creating containers, including image updates | `""` |
 | `default_memory_limit` | Memory limit for new containers, for example `"512m"`; applies when creating containers, including image updates | `""` |
 | `max_parallelism` | Maximum concurrent builds; `0` = unlimited | `0` |
@@ -102,9 +102,9 @@ Example configuration file:
 The application auto-detects your WSL environment on startup. It queries the following:
 
 - **Shell**: `bash` or `sh`
-- **Init System**: `systemd`, `openrc`, or `none`
-- **Package Manager**: `apt` or `apk`
-- **Privilege Escalation**: `sudo` or `doas`
+- **Init System**: OpenRC
+- **Package Manager**: `apk`
+- **Privilege Escalation**: `doas`
 
 These settings are shown in the **WSL Environment** card in the Settings tab. You can also click the **Auto-Detect Environment** button to see the detected values.
 
@@ -115,9 +115,9 @@ If auto-detection fails or you want to override it, set the following fields in 
 | Field | Description | Options |
 |---|---|---|
 | `shell` | Shell for executing commands in WSL | `bash`, `sh` |
-| `init_system` | Init system for service management | `systemd`, `openrc`, `none` |
-| `pkg_manager` | Package manager for install commands | `apt`, `apk` |
-| `privilege_cmd` | Command for privilege escalation | `sudo`, `doas` |
+| `init_system` | Init system for service management | `openrc`, `none` |
+| `pkg_manager` | Package manager for install commands | `apk` |
+| `privilege_cmd` | Command for privilege escalation | `doas` |
 
 Leave these fields empty (`""`) to use auto-detection. The app will query the WSL environment using a POSIX-compatible script and cache the result.
 
@@ -127,27 +127,15 @@ For Alpine Linux:
 
 ```json
 {
-  "wsl_distro": "Alpine",
-  "shell": "bash",
+  "wsl_distro": "Alpine-ContainerdUI",
+  "shell": "sh",
   "init_system": "openrc",
   "pkg_manager": "apk",
-  "privilege_cmd": "sudo"
+  "privilege_cmd": "doas"
 }
 ```
 
-### Example: Debian Configuration (Default)
-
-For Debian:
-
-```json
-{
-  "wsl_distro": "Debian",
-  "shell": "bash",
-  "init_system": "systemd",
-  "pkg_manager": "apt",
-  "privilege_cmd": "sudo"
-}
-```
+Only `Alpine-ContainerdUI` is supported as the runtime distribution. Existing configurations that selected the old `Alpine` distro automatically switch to `Alpine-ContainerdUI` when it is installed. If the bundled distro is missing, run `Alpine-ContainerdUI-Setup.exe`, then restart the app or run **Auto-Detect Environment**.
 
 ## Practical Recommendations
 
@@ -249,7 +237,7 @@ The application supports managing multiple projects from a single installation. 
     }
   ],
   "active_project_path": "C:\Users\User\OneDrive\Рабочий стол\ai-chatbot-website",
-  "wsl_distro": "Debian",
+  "wsl_distro": "Alpine-ContainerdUI",
   "cd_port": 50051,
   "cd_namespace": "default"
 }
@@ -342,7 +330,7 @@ Detailed behavior and usage scenarios are described in [concepts.md](concepts.md
 
 When values are not set, the application uses these defaults:
 
-- `wsl_distro = Debian`
+- `wsl_distro = Alpine-ContainerdUI`
 - `deployment_proxy = traefik`
 - `deploy_network = soul-dialogue` (for older configurations; explicitly setting the project network name is recommended)
 - `deploy_service_backend = backend`

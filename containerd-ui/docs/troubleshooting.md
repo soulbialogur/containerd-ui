@@ -6,9 +6,9 @@ The complete access architecture is described in [concepts.md](concepts.md). Use
 
 ## Alpine-Specific Issues
 
-### Service Management
+### OpenRC Service Management
 
-Alpine uses OpenRC, not systemd. If you see errors about `systemctl`:
+Check and manage the runtime service with OpenRC:
 
 ```bash
 # Check status
@@ -82,10 +82,10 @@ The complete set of checks for `containerd`, `nerdctl`, services, and the enviro
 
 First verify the installation using [installation.md](installation.md). For startup and diagnostic commands, see [diagnostics.md](diagnostics.md), which also includes manual startup options and service checks.
 
-If the service still does not respond, check the logs:
+If BuildKit does not respond, inspect the Alpine system log when available:
 
 ```bash
-sudo journalctl -u buildkit -n 100 --no-pager
+doas tail -n 100 /var/log/messages
 ```
 
 ## Cannot Connect to containerd
@@ -93,8 +93,8 @@ sudo journalctl -u buildkit -n 100 --no-pager
 Make sure `containerd` is running and available inside WSL:
 
 ```bash
-wsl -d Debian -- systemctl status containerd
-wsl -d Debian -- ss -lnt | grep 50051
+wsl -d Alpine-ContainerdUI -- rc-service containerd status
+wsl -d Alpine-ContainerdUI -- ss -lnt | grep 50051
 ```
 
 If the port is not open, check whether it is blocked by a firewall or iptables. In most cases, starting the container runtime and running `nerdctl info` again resolves the issue.
@@ -150,17 +150,11 @@ If the cache fills up quickly, increase `max_wsl_cache_size` and adjust `wsl_cac
 
 ## Containers Die Seconds After Startup With No Error
 
-Symptoms: containers start normally, report `Up`, then all of them disappear a few seconds later. `nerdctl ps -a` shows them back in `Created` or `Exited` state, `nerdctl logs` is empty or stops mid-startup, there is no OOM kill in `dmesg`, and the containerd journal shows no stop request.
+Symptoms: containers start normally, report `Up`, then all of them disappear a few seconds later. `nerdctl ps -a` shows them back in `Created` or `Exited` state, `nerdctl logs` is empty or stops mid-startup, and there is no OOM kill in `dmesg`.
 
 This is usually not a Docker, Compose, or application problem. WSL 2.6.x added automatic shutdown of idle distributions: `instanceIdleTimeout` defaults to `15000` ms. A detached (`-d`) container does **not** count as distribution activity — when the last `wsl.exe` session exits, WSL powers off the whole distribution about 15 seconds later, taking containerd and every container with it. Container logs stay silent because the entire VM stops instead of the containers failing.
 
-Confirm it by comparing boot lifetimes with the moments containers died:
-
-```bash
-journalctl --list-boots
-```
-
-Many short-lived boots ending in a clean `systemd-poweroff` (no crash, no OOM) is the signature. On the Windows side, `wsl -l -v` may also show the distribution as `Stopped` while you expect the stack to keep running.
+Confirm it by checking whether `wsl -l -v` shows `Alpine-ContainerdUI` as `Stopped` after the containers disappear. This indicates the WSL distribution itself shut down, taking containerd and its containers with it.
 
 Fix: disable the idle shutdown in `%UserProfile%\.wslconfig`:
 
@@ -231,8 +225,8 @@ Restart the application after editing the file manually.
 ## Useful Commands
 
 ```powershell
-wsl -d Debian -- nerdctl ps -a
-wsl -d Debian -- nerdctl compose -f /path/to/compose.yaml config
+wsl -d Alpine-ContainerdUI -- nerdctl ps -a
+wsl -d Alpine-ContainerdUI -- nerdctl compose -f /path/to/compose.yaml config
 ```
 
 ## Application Logs

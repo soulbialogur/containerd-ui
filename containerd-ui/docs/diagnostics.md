@@ -8,54 +8,55 @@ This is the single reference for environment checks and command-line diagnostics
 wsl --list --verbose
 ```
 
-If the distribution is not installed:
+If the bundled distribution is not installed, run `Alpine-ContainerdUI-Setup.exe` to import it into WSL2. Do not install Alpine from the Microsoft Store.
 
 ```powershell
-wsl --install Debian
+wsl --list --verbose
 ```
 
 Check from inside WSL:
 
 ```powershell
-wsl -d Debian -- nerdctl version
-wsl -d Debian -- systemctl is-active containerd
-wsl -d Debian -- systemctl is-active buildkit
+wsl -d Alpine-ContainerdUI -- nerdctl version
+wsl -d Alpine-ContainerdUI -- rc-service containerd status
+wsl -d Alpine-ContainerdUI -- buildctl debug workers
 ```
 
-The expected distribution name in `config.json` is `"wsl_distro": "Debian"`. Do not use the UNC path `\\wsl.localhost\\Debian` as the distribution name.
+The only supported distribution name in `config.json` is `"wsl_distro": "Alpine-ContainerdUI"`. Do not use the UNC path `\\wsl.localhost\\Alpine-ContainerdUI` as the distribution name.
 
 ## 2. Check containerd and nerdctl
 
 ```bash
 nerdctl info
-systemctl status containerd
+rc-service containerd status
 ```
 
 If the container runtime is not running:
 
 ```bash
-sudo systemctl enable containerd
-sudo systemctl start containerd
-sudo systemctl status containerd
+doas rc-update add containerd default
+doas rc-service containerd start
+doas rc-service containerd status
+doas rc-service containerd-ui-grpc-proxy status
+busybox netstat -lnt | grep ':50051'
 ```
 
 ## 3. Check BuildKit
 
 ```bash
-sudo systemctl status buildkit
-sudo systemctl is-active buildkit
+buildctl debug workers
 ```
 
 If the service is not running:
 
 ```bash
-sudo systemctl start buildkit
+buildkitd --addr unix:///run/buildkit/buildkitd.sock
 ```
 
 For a direct start:
 
 ```bash
-sudo buildkitd --addr unix:///run/buildkit/buildkitd.sock
+doas buildkitd --addr unix:///run/buildkit/buildkitd.sock
 ```
 
 ## 4. Check Deployment Tools
@@ -82,7 +83,7 @@ cloudflared tunnel list --credentials-file /path/to/credentials.json
 
 ## 5. Check Build Tools
 
-These tools are needed only to build `containerd-ui.exe` from source. They are installed in Debian, not inside the Windows application:
+These tools are included in the bundled distribution and are needed only to build `containerd-ui.exe` from source:
 
 ```bash
 go version
@@ -109,7 +110,7 @@ netstat -ano | findstr :443
 Linux inside WSL:
 
 ```bash
-sudo ss -tulpn | grep ':80\|:443'
+doas ss -tulpn | grep ':80\|:443'
 ```
 
 Ports `80` and `443` must be available for Traefik.

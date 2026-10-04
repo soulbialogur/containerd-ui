@@ -2,14 +2,14 @@
 
 ## Runtime Stack
 
-The supported quickstart path is Windows 10/11 with WSL2 Debian, systemd, containerd, nerdctl, and BuildKit. Go and MinGW are needed only when building `containerd-ui.exe` from source.
+The supported quickstart path is Windows 10/11 with the bundled `Alpine-ContainerdUI` distro in WSL2, OpenRC, containerd, nerdctl, and BuildKit.
 
 ## 1. Install the Prerequisites
 
-Make sure WSL2 is enabled on Windows and Debian is installed.
+Make sure WSL2 is enabled on Windows, then run `dist\Alpine-ContainerdUI-Setup.exe` to import the bundled runtime image.
 
 ```powershell
-wsl --install Debian
+wsl --list --verbose
 ```
 
 After installation, verify that WSL and the Linux environment are available:
@@ -22,7 +22,7 @@ The complete set of container environment and service checks is in [diagnostics.
 
 ## 2. Install the Minimum Components
 
-The following must be available inside WSL:
+The following are preinstalled in `Alpine-ContainerdUI`:
 
 - containerd
 - nerdctl
@@ -31,40 +31,38 @@ The following must be available inside WSL:
 
 The container access model and fallback behavior are described in [concepts.md](concepts.md). For a first run, remember that the containerd gRPC API is the primary path and WSL + nerdctl is the fallback.
 
-Install the Debian runtime components:
+Verify the runtime:
 
-```bash
-sudo apt update
-sudo apt install -y containerd nerdctl buildkit
-sudo systemctl enable --now containerd
-sudo systemctl enable --now buildkit
+```powershell
+wsl -d Alpine-ContainerdUI -- nerdctl info
+wsl -d Alpine-ContainerdUI -- buildctl --version
 ```
 
 For detailed BuildKit installation, see [installation.md](installation.md). For diagnostics and manual startup, see [troubleshooting.md](troubleshooting.md).
 
 ## 3. Install Build Tools
 
-Only required when compiling from source:
-
-```bash
-sudo apt install -y golang gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
-```
+Go, MinGW-w64, and OpenGL development files are also included in the bundled distro for source builds.
 
 ## 4. Build the Application
 
 From the repository root:
 
 ```powershell
-cd "C:\Users\User\OneDrive\Desktop\ai-chatbot-website"
-bash containerd-ui/build.sh
+wsl -d Alpine-ContainerdUI
 ```
 
-The build should produce `containerd-ui.exe`.
+```bash
+cd /mnt/c/Users/User/OneDrive/Desktop/ai-chatbot-website
+sh containerd-ui/build.sh
+```
+
+The build produces `containerd-ui/dist/containerd-ui.exe`. The icon is embedded in the executable.
 
 ## 5. Start the Application
 
 ```powershell
-Start-Process .\containerd-ui\containerd-ui.exe
+Start-Process .\containerd-ui\dist\containerd-ui.exe
 ```
 
 ## 6. Set the Project Path
