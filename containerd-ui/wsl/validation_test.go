@@ -1,11 +1,16 @@
 package wsl
 
 import (
+	"containerd-ui/i18n"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,9 +25,340 @@ func TestCacheManagerInvalidateDoesNotRecurse(t *testing.T) {
 		CacheEventVolumes,
 		CacheEventStats,
 	}
-
 	for _, eventType := range events {
 		GlobalCacheManager.Invalidate(eventType, "test")
+	}
+}
+
+func TestCacheManagerRecentEventsHandlesNegativeLimit(t *testing.T) {
+	manager := &CacheManager{maxEvents: 10}
+	manager.Publish(CacheEvent{Type: CacheEventAll, Reason: "test"})
+
+	if got := manager.GetRecentEvents(-1); len(got) != 0 {
+		t.Fatalf("GetRecentEvents(-1) returned %d events, want 0", len(got))
+	}
+
+	if got := manager.GetSummary()["recentEvents"].([]CacheEvent); len(got) != 1 {
+		t.Fatalf("GetSummary() returned %d recent events, want 1", len(got))
+	}
+}
+
+func TestCDListContainersUsesFullCacheForBothViews(t *testing.T) {
+	previous, wasCached := containersCache.Get()
+	containersCache.Set([]Container{
+		{ID: "running", Status: "running"},
+		{ID: "stopped", Status: "exited"},
+	})
+	t.Cleanup(func() {
+		if wasCached {
+			containersCache.Set(previous)
+		} else {
+			containersCache.Invalidate()
+		}
+	})
+
+	running, err := CDListContainers(false)
+	if err != nil || len(running) != 1 || running[0].ID != "running" {
+		t.Fatalf("CDListContainers(false) = (%v, %v), want only the running container", running, err)
+	}
+
+	all, err := CDListContainers(true)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("CDListContainers(true) returned %d containers, %v; want running and stopped", len(all), err)
+	}
+}
+
+func TestContainerdHealthProbeResetsAfterConsecutiveFailures(t *testing.T) {
+	previous := cdHealthFailures.Swap(0)
+	t.Cleanup(func() {
+		cdHealthFailures.Store(previous)
+	})
+
+	for attempt := 1; attempt < containerdHealthFailureLimit; attempt++ {
+		if shouldResetCDClientAfterPing(errors.New("containerd unavailable")) {
+			t.Fatalf("health probe reset on failure %d, want %d failures", attempt, containerdHealthFailureLimit)
+		}
+	}
+	if !shouldResetCDClientAfterPing(errors.New("containerd unavailable")) {
+		t.Fatalf("health probe did not reset after %d failures", containerdHealthFailureLimit)
+	}
+	if shouldResetCDClientAfterPing(errors.New("containerd unavailable")) {
+		t.Fatal("health failure counter was not reset after reaching the threshold")
+	}
+	if shouldResetCDClientAfterPing(nil) {
+		t.Fatal("successful health probe requested a client reset")
+	}
+	if shouldResetCDClientAfterPing(errors.New("containerd unavailable")) {
+		t.Fatal("successful health probe did not clear the failure counter")
+	}
+}
+
+func TestParseContainerStatsOutput(t *testing.T) {
+	output := `{"ID":"123456789abcdef","Name":"containerd-api","CPUPerc":"1.2%","MemUsage":"2MiB / 4MiB","NetIO":"0B / 0B","PIDs":"0"}`
+	stats := parseContainerStatsOutput(output)
+	if len(stats) != 1 {
+		t.Fatalf("parseContainerStatsOutput() returned %d rows, want 1", len(stats))
+	}
+	got := stats[0]
+	if got.ID != "123456789abc" || got.Name != "api" || got.CPU != "1.2%" || got.PIDs != "—" {
+		t.Fatalf("parseContainerStatsOutput() = %+v", got)
+	}
+}
+
+func TestParseSystemResources(t *testing.T) {
+	output := "Mem: 8G 2G 6G 0B 0B 0B\n---CPU---\n4\n0.10 0.15 0.20 1/100 123\n---DISK---\n/dev/sda 100G 20G 80G 20% /"
+	resources, err := parseSystemResources(output)
+	if err != nil {
+		t.Fatalf("parseSystemResources() error = %v", err)
+	}
+	if resources.RAMTotal != "8G" || resources.RAMUsed != "2G" || resources.CPUCores != "4" || resources.DiskFree != "80G" {
+		t.Fatalf("parseSystemResources() = %+v", resources)
+	}
+}
+
+func TestSplitContainerLogTimestamp(t *testing.T) {
+	timestamp := "2026-10-01T18:24:17.123456789Z"
+	gotTimestamp, message, ok := splitContainerLogTimestamp(timestamp + " application started")
+	if !ok || gotTimestamp != timestamp || message != "application started" {
+		t.Fatalf("splitContainerLogTimestamp() = (%q, %q, %t)", gotTimestamp, message, ok)
+	}
+	if _, message, ok := splitContainerLogTimestamp("plain log line"); ok || message != "plain log line" {
+		t.Fatalf("plain log line should be preserved without a timestamp, got (%q, %t)", message, ok)
+	}
+	if timestamp, message, ok := stripContainerLogTimestamp("invalid-time application started"); !ok || timestamp != "invalid-time" || message != "application started" {
+		t.Fatalf("stripContainerLogTimestamp() = (%q, %q, %t)", timestamp, message, ok)
+	}
+}
+
+func TestParseContainerLogEntries(t *testing.T) {
+	output := "2026-10-01T18:24:17.123456789Z first event\n2026-10-01T18:24:18.123456789Z second event"
+	entries := parseContainerLogEntries(output)
+	if len(entries) != 2 {
+		t.Fatalf("parseContainerLogEntries() returned %d entries, want 2", len(entries))
+	}
+	if entries[0].Timestamp != "2026-10-01T18:24:17.123456789Z" || entries[0].Message != "first event" {
+		t.Fatalf("first entry = %+v", entries[0])
+	}
+	if entries[1].Timestamp != "2026-10-01T18:24:18.123456789Z" || entries[1].Message != "second event" {
+		t.Fatalf("second entry = %+v", entries[1])
+	}
+}
+
+func TestCacheManagerConcurrentSubscribeAndPublish(t *testing.T) {
+	manager := &CacheManager{maxEvents: 100}
+	var callbackCount atomic.Int64
+	manager.Subscribe(func(CacheEvent) {
+		callbackCount.Add(1)
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			manager.Subscribe(func(CacheEvent) {
+				callbackCount.Add(1)
+			})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			manager.Publish(CacheEvent{Type: CacheEventAll})
+		}
+	}()
+	wg.Wait()
+
+	if got := callbackCount.Load(); got < 100 {
+		t.Fatalf("callbacks invoked = %d, want at least one per publish", got)
+	}
+}
+
+func TestCacheManagerSubscribeReturnsUnsubscribe(t *testing.T) {
+	manager := &CacheManager{maxEvents: 10}
+	var calls atomic.Int64
+	unsubscribe := manager.Subscribe(func(CacheEvent) {
+		calls.Add(1)
+	})
+
+	manager.Publish(CacheEvent{Type: CacheEventAll})
+	unsubscribe()
+	unsubscribe()
+	manager.Publish(CacheEvent{Type: CacheEventAll})
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("subscriber called %d times, want 1", got)
+	}
+}
+
+func TestContainerStatusStoreEvictsOldestByTimestamp(t *testing.T) {
+	store := newContainerStatusCache(time.Hour)
+	store.maxLen = 3
+	store.set("oldest", "old")
+	store.set("middle", "middle")
+	store.set("newest", "new")
+
+	store.mu.Lock()
+	now := time.Now()
+	for id, age := range map[string]time.Duration{
+		"oldest": 3 * time.Minute,
+		"middle": 2 * time.Minute,
+		"newest": time.Minute,
+	} {
+		entry := store.data[id]
+		entry.timestamp = now.Add(-age)
+		store.data[id] = entry
+	}
+	store.mu.Unlock()
+
+	store.set("middle", "updated")
+	store.set("latest", "latest")
+
+	if _, ok := store.get("oldest"); ok {
+		t.Fatal("oldest status entry was not evicted")
+	}
+	if got, ok := store.get("middle"); !ok || got != "updated" {
+		t.Fatalf("updated entry = (%q, %t), want (updated, true)", got, ok)
+	}
+	if _, ok := store.get("newest"); !ok {
+		t.Fatal("newest existing entry was evicted")
+	}
+	if _, ok := store.get("latest"); !ok {
+		t.Fatal("new entry was not stored")
+	}
+}
+
+func TestGetConfigReturnsIndependentSnapshot(t *testing.T) {
+	configCache.Lock()
+	previous := configCache.config
+	configCache.config = &AppConfig{
+		DeployNetwork: "original-network",
+		Projects:      []ProjectInfo{{Path: `C:\projects\app`, Name: "original"}},
+	}
+	configCache.Unlock()
+	defer func() {
+		configCache.Lock()
+		configCache.config = previous
+		configCache.Unlock()
+	}()
+
+	snapshot := GetConfig()
+	snapshot.DeployNetwork = "mutated-network"
+	snapshot.Projects[0].Name = "mutated"
+
+	got := GetConfig()
+	if got.DeployNetwork != "original-network" || got.Projects[0].Name != "original" {
+		t.Fatalf("GetConfig() snapshot mutation leaked into cache: %+v", got)
+	}
+}
+
+func TestApplyConfigToCachesAppliesZeroLimits(t *testing.T) {
+	previousTTL := wslCacheTTL.Load()
+	wslCache.Lock()
+	previousMaxSize := wslCache.maxSize
+	previousCleanupAt := wslCache.cleanupAt
+	previousEntries := wslCache.m
+	previousOrder := wslCache.order
+	previousTotalSize := wslCache.totalSize
+	wslCache.m = make(map[string]wslCacheEntry)
+	wslCache.order.Init()
+	wslCache.totalSize = 0
+	wslCache.Unlock()
+	t.Cleanup(func() {
+		wslCache.Lock()
+		wslCache.maxSize = previousMaxSize
+		wslCache.cleanupAt = previousCleanupAt
+		wslCache.m = previousEntries
+		wslCache.order = previousOrder
+		wslCache.totalSize = previousTotalSize
+		wslCache.Unlock()
+		wslCacheTTL.Store(previousTTL)
+	})
+
+	config := DefaultConfig()
+	config.MaxWSLCacheSize = 1024
+	config.WSLCacheCleanupAt = 0
+	ApplyConfigToCaches(config)
+	storeWSLResult("Alpine", "probe-1", "one")
+	storeWSLResult("Alpine", "probe-2", "two")
+	wslCache.RLock()
+	countWithoutLimit := len(wslCache.m)
+	wslCache.RUnlock()
+	if countWithoutLimit != 2 {
+		t.Fatalf("entries with cleanup limit 0 = %d, want 2", countWithoutLimit)
+	}
+
+	config.MaxWSLCacheSize = 0
+	ApplyConfigToCaches(config)
+	storeWSLResult("Alpine", "probe-3", "three")
+	wslCache.RLock()
+	maxSize := wslCache.maxSize
+	entryCount := len(wslCache.m)
+	wslCache.RUnlock()
+	if maxSize != 0 || entryCount != 0 {
+		t.Fatalf("cache with max size 0 = (size %d, entries %d), want disabled and empty", maxSize, entryCount)
+	}
+}
+
+func TestWSLCacheEvictsOldestEntryInInsertionOrder(t *testing.T) {
+	wslCache.Lock()
+	previousMaxSize := wslCache.maxSize
+	previousCleanupAt := wslCache.cleanupAt
+	previousEntries := wslCache.m
+	previousOrder := wslCache.order
+	previousTotalSize := wslCache.totalSize
+	wslCache.maxSize = 1024
+	wslCache.cleanupAt = 2
+	wslCache.m = make(map[string]wslCacheEntry)
+	wslCache.order.Init()
+	wslCache.totalSize = 0
+	wslCache.Unlock()
+	t.Cleanup(func() {
+		wslCache.Lock()
+		wslCache.maxSize = previousMaxSize
+		wslCache.cleanupAt = previousCleanupAt
+		wslCache.m = previousEntries
+		wslCache.order = previousOrder
+		wslCache.totalSize = previousTotalSize
+		wslCache.Unlock()
+	})
+
+	storeWSLResult("Alpine", "first", "1")
+	storeWSLResult("Alpine", "second", "2")
+	storeWSLResult("Alpine", "third", "3")
+
+	wslCache.RLock()
+	_, firstExists := wslCache.m["Alpine\x00first"]
+	_, secondExists := wslCache.m["Alpine\x00second"]
+	_, thirdExists := wslCache.m["Alpine\x00third"]
+	wslCache.RUnlock()
+	if firstExists || !secondExists || !thirdExists {
+		t.Fatalf("unexpected WSL cache entries after FIFO eviction: first=%t second=%t third=%t", firstExists, secondExists, thirdExists)
+	}
+}
+
+func TestBoundedStringCacheExpiresFromQueueHeadAndEvictsOldest(t *testing.T) {
+	cache := newBoundedStringCache(time.Hour, 2)
+	cache.Set("expired", "old")
+	cache.mu.Lock()
+	expired := cache.data["expired"]
+	expired.timestamp = time.Now().Add(-2 * cache.defaultTTL)
+	cache.data["expired"] = expired
+	cache.mu.Unlock()
+
+	cache.Set("first", "1")
+	cache.Set("second", "2")
+	cache.Set("third", "3")
+
+	cache.mu.RLock()
+	_, expiredExists := cache.data["expired"]
+	_, firstExists := cache.data["first"]
+	_, secondExists := cache.data["second"]
+	_, thirdExists := cache.data["third"]
+	orderLength := cache.order.Len()
+	cache.mu.RUnlock()
+	if expiredExists || firstExists || !secondExists || !thirdExists || orderLength != 2 {
+		t.Fatalf("unexpected bounded string cache state: expired=%t first=%t second=%t third=%t order=%d", expiredExists, firstExists, secondExists, thirdExists, orderLength)
 	}
 }
 
@@ -34,8 +370,17 @@ func TestParseDetectedEnvironmentOpenRC(t *testing.T) {
 }
 
 func TestGetDefaultWslDistroName(t *testing.T) {
-	if got := GetDefaultWslDistroName(); got != "Alpine" {
-		t.Fatalf("GetDefaultWslDistroName() = %q, want Alpine", got)
+	if got := GetDefaultWslDistroName(); got != "Alpine-ContainerdUI" {
+		t.Fatalf("GetDefaultWslDistroName() = %q, want Alpine-ContainerdUI", got)
+	}
+	if got := GetBundledWslDistroName(); got != "Alpine-ContainerdUI" {
+		t.Fatalf("GetBundledWslDistroName() = %q, want Alpine-ContainerdUI", got)
+	}
+	if !IsSupportedWslDistro("Alpine-ContainerdUI") || !IsSupportedWslDistro("alpine-containerdui") {
+		t.Fatal("the bundled distro should be accepted case-insensitively")
+	}
+	if IsSupportedWslDistro("Alpine") || IsSupportedWslDistro("Ubuntu") {
+		t.Fatal("only Alpine-ContainerdUI should be an accepted runtime distro")
 	}
 }
 
@@ -45,7 +390,9 @@ func TestDetectWslDistroFromList(t *testing.T) {
 		distros []string
 		want    string
 	}{
-		{name: "prefer alpine", distros: []string{"Ubuntu", "Alpine"}, want: "Alpine"},
+		{name: "select bundled distro", distros: []string{"Ubuntu", "Alpine-ContainerdUI"}, want: "Alpine-ContainerdUI"},
+		{name: "ignore legacy Alpine", distros: []string{"Alpine"}, want: ""},
+		{name: "prefer bundled distro when legacy Alpine exists", distros: []string{"Alpine", "Alpine-ContainerdUI"}, want: "Alpine-ContainerdUI"},
 		{name: "do not fall back to unsupported distros", distros: []string{"Ubuntu", "Fedora"}, want: ""},
 		{name: "ignore unsupported distros", distros: []string{"docker-desktop", "rancher-desktop-data", "Ubuntu"}, want: ""},
 		{name: "ignore infrastructure only", distros: []string{"docker-desktop", "rancher-desktop"}, want: ""},
@@ -432,6 +779,49 @@ func TestCloudflareConfigOrdersBackendPathBeforeFrontendCatchAll(t *testing.T) {
 	}
 }
 
+func TestFormatBuildErrorPreservesStructureAndRendersLastOutputLines(t *testing.T) {
+	previousLocale := i18n.GetCurrentLocale()
+	i18n.SetLocale(i18n.LocaleRU)
+	defer i18n.SetLocale(previousLocale)
+
+	lines := make([]string, 31)
+	for index := range lines {
+		lines[index] = fmt.Sprintf("step-%02d", index+1)
+	}
+	status := errors.New("build exited with code 1")
+	formatted := formatBuildError(strings.Join(lines, "\n"), status)
+
+	var buildErr *BuildError
+	if !errors.As(formatted, &buildErr) {
+		t.Fatalf("formatBuildError() type = %T, want *BuildError", formatted)
+	}
+	if buildErr.Status != status || len(strings.Split(buildErr.Output, "\n")) != 31 || buildErr.Hint != "" {
+		t.Fatalf("BuildError fields were not preserved: %+v", buildErr)
+	}
+	rendered := buildErr.Error()
+	if strings.Contains(rendered, "step-01") || !strings.Contains(rendered, "step-02") || !strings.Contains(rendered, "step-31") {
+		t.Fatalf("BuildError should render only the last 30 output lines:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, i18n.T("build_error.status", status.Error())) {
+		t.Fatalf("BuildError should render localized status:\n%s", rendered)
+	}
+}
+
+func TestFormatBuildErrorAddsHintWhenOutputIsEmpty(t *testing.T) {
+	previousLocale := i18n.GetCurrentLocale()
+	i18n.SetLocale(i18n.LocaleEN)
+	defer i18n.SetLocale(previousLocale)
+
+	formatted := formatBuildError("", errors.New("exit status 1"))
+	var buildErr *BuildError
+	if !errors.As(formatted, &buildErr) {
+		t.Fatalf("formatBuildError() type = %T, want *BuildError", formatted)
+	}
+	if buildErr.Output != "" || buildErr.Hint == "" || !strings.Contains(formatted.Error(), i18n.T("build_error.default_hint")) {
+		t.Fatalf("BuildError did not render its empty-output hint: %+v\n%s", buildErr, formatted)
+	}
+}
+
 func TestLooksLikeBuildkitDaemonStartup(t *testing.T) {
 	startupLog := `time="2026-09-14T19:52:57+00:00" level=info msg="found worker \"/var/lib...\""
 level=info msg="running server on /run/buildkit/buildkitd.sock"
@@ -605,16 +995,55 @@ func TestParseNetworkContainersRemovesNULBytes(t *testing.T) {
 	}
 }
 
-func TestParseImageLinePreservesCreatedAt(t *testing.T) {
+func TestParseImageLineNormalizesCreatedAtAndSize(t *testing.T) {
 	image, err := parseImageLine(`{"ID":"7378c","Repository":"backend","Tag":"latest","Size":"1.454G","CreatedAt":"2026-09-20 12:34:56 +0000 UTC"}`)
 	if err != nil {
 		t.Fatalf("parseImageLine() unexpected error: %v", err)
 	}
-	if image.CreatedAt == "" {
-		t.Fatal("parseImageLine() should preserve CreatedAt")
+	if image.CreatedAt != "2026-09-20T12:34:56Z" {
+		t.Fatalf("parseImageLine() CreatedAt = %q, want full RFC3339 timestamp", image.CreatedAt)
 	}
-	if got := FormatDateShort(image.CreatedAt); got != "2026-09-20 12:34" {
-		t.Fatalf("FormatDateShort(CreatedAt) = %q, want %q", got, "2026-09-20 12:34")
+	if image.Size != "1.45 GB" {
+		t.Fatalf("parseImageLine() Size = %q, want normalized human-readable size", image.Size)
+	}
+
+	bytesImage, err := parseImageLine(`{"Size":"1536","CreatedAt":"bad-date"}`)
+	if err != nil {
+		t.Fatalf("parseImageLine() unexpected error for byte size: %v", err)
+	}
+	if bytesImage.Size != "1.5 KB" {
+		t.Fatalf("parseImageLine() raw byte Size = %q, want 1.5 KB", bytesImage.Size)
+	}
+	if bytesImage.CreatedAt != "bad-date" {
+		t.Fatalf("parseImageLine() should preserve unrecognized CreatedAt, got %q", bytesImage.CreatedAt)
+	}
+}
+
+func TestFormatDateShortRemovesSecondsAndTimezone(t *testing.T) {
+	got := FormatDateShort("2026-09-30T15:25:56+00:00")
+	if got != "2026-09-30 15:25" {
+		t.Fatalf("FormatDateShort() = %q, want compact timestamp", got)
+	}
+}
+
+func TestSplitContainerStatusExtractsUptimeAndHealth(t *testing.T) {
+	status, uptime, health := splitContainerStatus("Up 2 minutes (unhealthy)")
+	if status != "Up 2 minutes" || uptime != "2 minutes" || health != "unhealthy" {
+		t.Fatalf("splitContainerStatus() = (%q, %q, %q)", status, uptime, health)
+	}
+
+	status, uptime, health = splitContainerStatus("Up 5 seconds (healthy)")
+	if status != "Up 5 seconds" || uptime != "5 seconds" || health != "healthy" {
+		t.Fatalf("splitContainerStatus() = (%q, %q, %q)", status, uptime, health)
+	}
+
+	status, uptime, health = splitContainerStatus("Exited (1) 2 minutes ago")
+	if status != "Exited (1) 2 minutes ago" || uptime != "" || health != "" {
+		t.Fatalf("stopped status should not produce uptime/health: (%q, %q, %q)", status, uptime, health)
+	}
+
+	if got := TranslateStatus("unhealthy"); got != i18n.T("container_status.unhealthy") {
+		t.Fatalf("TranslateStatus(unhealthy) = %q, want unhealthy translation", got)
 	}
 }
 

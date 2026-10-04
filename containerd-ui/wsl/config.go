@@ -235,12 +235,32 @@ func IsWslDistroAvailable(name string) bool {
 	return false
 }
 
-// GetDefaultWslDistroName задаёт единственный поддерживаемый runtime-дистрибутив.
+// GetDefaultWslDistroName returns the bundled runtime distro name.
 func GetDefaultWslDistroName() string {
-	return "Alpine"
+	return GetBundledWslDistroName()
 }
 
-// DetectWslDistro выбирает Alpine и не переключается на неподдерживаемые дистрибутивы.
+// GetBundledWslDistroName returns the distro installed by the offline setup executable.
+func GetBundledWslDistroName() string {
+	return "Alpine-ContainerdUI"
+}
+
+// GetSupportedWslDistroNames returns the runtime distro names accepted by the app.
+func GetSupportedWslDistroNames() []string {
+	return []string{GetDefaultWslDistroName()}
+}
+
+// IsSupportedWslDistro reports whether name identifies a supported Alpine runtime.
+func IsSupportedWslDistro(name string) bool {
+	for _, supported := range GetSupportedWslDistroNames() {
+		if strings.EqualFold(strings.TrimSpace(name), supported) {
+			return true
+		}
+	}
+	return false
+}
+
+// DetectWslDistro selects only the bundled runtime distro.
 func DetectWslDistro() string {
 	distros := DetectWslDistros()
 	return detectWslDistroFromList(distros)
@@ -258,7 +278,7 @@ func detectWslDistroFromList(distros []string) string {
 	}
 
 	for _, distro := range available {
-		if strings.EqualFold(distro, GetDefaultWslDistroName()) {
+		if IsSupportedWslDistro(distro) {
 			return distro
 		}
 	}
@@ -270,6 +290,7 @@ func LoadConfig() (*AppConfig, error) {
 	path := ConfigPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		config.WslDistro = DetectWslDistro()
 		return config, nil
 	}
 	if err := json.Unmarshal(data, config); err != nil {
@@ -279,7 +300,7 @@ func LoadConfig() (*AppConfig, error) {
 
 	// Никогда не доверяем старому имени distro без проверки.
 	// Пользователь мог удалить/переименовать дистрибутив между запусками.
-	if !strings.EqualFold(config.WslDistro, GetDefaultWslDistroName()) || !IsWslDistroAvailable(config.WslDistro) {
+	if !IsSupportedWslDistro(config.WslDistro) || !IsWslDistroAvailable(config.WslDistro) {
 		if detected := DetectWslDistro(); detected != "" {
 			config.WslDistro = detected
 		} else {
@@ -640,7 +661,7 @@ func GetWslDistro() string {
 	if configCache.config != nil {
 		distro := strings.TrimSpace(configCache.config.WslDistro)
 		configCache.RUnlock()
-		if distro != "" {
+		if IsSupportedWslDistro(distro) {
 			return distro
 		}
 	} else {
@@ -930,7 +951,16 @@ func BuildFlags() string {
 func GetConfig() *AppConfig {
 	configCache.RLock()
 	defer configCache.RUnlock()
-	return configCache.config
+	return cloneAppConfig(configCache.config)
+}
+
+func cloneAppConfig(config *AppConfig) *AppConfig {
+	if config == nil {
+		return nil
+	}
+	copy := *config
+	copy.Projects = append([]ProjectInfo(nil), config.Projects...)
+	return &copy
 }
 
 func GetDefaultCPU() string {
@@ -1102,12 +1132,13 @@ func InitConfigCache(config *AppConfig) {
 	if config == nil {
 		return
 	}
+	cachedConfig := cloneAppConfig(config)
 	configCache.Lock()
 	previous := *DefaultConfig()
 	if configCache.config != nil {
 		previous = *configCache.config
 	}
-	configCache.config = config
+	configCache.config = cachedConfig
 	configCache.Unlock()
 
 	cdMu.Lock()
@@ -1129,16 +1160,30 @@ func ApplyConfigToCaches(config *AppConfig) {
 		return
 	}
 	wslCacheTTL.Store(int64(config.WslCacheTTL))
-	if config.MaxWSLCacheSize > 0 || config.WSLCacheCleanupAt > 0 {
-		wslCache.Lock()
-		if config.MaxWSLCacheSize > 0 {
-			wslCache.maxSize = config.MaxWSLCacheSize
-		}
-		if config.WSLCacheCleanupAt > 0 {
-			wslCache.cleanupAt = config.WSLCacheCleanupAt
-		}
-		wslCache.Unlock()
+	maxSize := config.MaxWSLCacheSize
+	if maxSize < 0 {
+		maxSize = 0
 	}
+	cleanupAt := config.WSLCacheCleanupAt
+	if cleanupAt < 0 {
+		cleanupAt = 0
+	}
+
+	wslCache.Lock()
+	wslCache.maxSize = maxSize
+	wslCache.cleanupAt = cleanupAt
+	if maxSize == 0 {
+		wslCache.m = make(map[string]wslCacheEntry)
+		wslCache.order.Init()
+		wslCache.totalSize = 0
+	} else {
+		for len(wslCache.m) > 0 && (wslCache.totalSize > maxSize || (cleanupAt > 0 && len(wslCache.m) > cleanupAt)) {
+			if !evictOldestWSLCacheEntryLocked() {
+				break
+			}
+		}
+	}
+	wslCache.Unlock()
 }
 
 var configCache = struct {

@@ -3,6 +3,7 @@ package wsl
 import (
 	"bufio"
 	"bytes"
+	"container/list"
 	"containerd-ui/i18n"
 	"context"
 	"encoding/json"
@@ -26,6 +27,8 @@ type Container struct {
 	Name   string `json:"Names"`
 	Image  string `json:"Image"`
 	Status string `json:"Status"`
+	Uptime string `json:"-"`
+	Health string `json:"-"`
 	Ports  string `json:"Ports"`
 }
 
@@ -193,13 +196,13 @@ type Image struct {
 	Tag        string `json:"Tag"`
 	Size       string `json:"Size"`
 	CreatedAt  string `json:"CreatedAt"`
-	sizeBytes  int64
 }
 
 type Volume struct {
 	Name       string `json:"Name"`
 	Driver     string `json:"Driver"`
 	Mountpoint string `json:"Mountpoint"`
+	Size       string `json:"-"`
 }
 
 type ContainerStat struct {
@@ -809,16 +812,17 @@ const maxWSLCacheSize = 10 * 1024 * 1024
 var wslCache = struct {
 	sync.RWMutex
 	m         map[string]wslCacheEntry
+	order     *list.List
 	totalSize int64
 	maxSize   int64
 	cleanupAt int
-}{m: make(map[string]wslCacheEntry), maxSize: maxWSLCacheSize, cleanupAt: 25}
+}{m: make(map[string]wslCacheEntry), order: list.New(), maxSize: maxWSLCacheSize, cleanupAt: 25}
 
 type wslCacheEntry struct {
 	output    string
-	err       error
 	timestamp time.Time
 	size      int64
+	orderNode *list.Element
 }
 
 func runWSLDirect(shell, command string) (string, error) {
@@ -841,19 +845,25 @@ func runWSLDirect(shell, command string) (string, error) {
 }
 
 func RunWSL(command string) (string, error) {
+	return runWSL(command, false)
+}
+
+func RunWSLCacheable(command string) (string, error) {
+	// Use only for read-only probes whose results are safe to reuse briefly.
+	return runWSL(command, true)
+}
+
+func runWSL(command string, cacheable bool) (string, error) {
 	distro := strings.TrimSpace(GetWslDistro())
 	if distro == "" {
 		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
 	}
 
-	wslCache.RLock()
-	ttl := time.Duration(wslCacheTTL.Load()) * time.Second
-	cacheKey := distro + "\x00" + command
-	if entry, ok := wslCache.m[cacheKey]; ok && time.Since(entry.timestamp) < ttl {
-		wslCache.RUnlock()
-		return entry.output, entry.err
+	if cacheable {
+		if output, ok := getCachedWSLResult(distro, command); ok {
+			return output, nil
+		}
 	}
-	wslCache.RUnlock()
 
 	// Таймаут защищает UI от вечной блокировки при зависшей WSL-VM.
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -870,43 +880,91 @@ func RunWSL(command string) (string, error) {
 		err = fmt.Errorf("таймаут выполнения WSL-команды (120s)")
 	}
 	result := strings.TrimSpace(decodeWSLOutput(filterWSLDiagnosticBytes(out.Bytes())))
-	resultSize := int64(len(result))
-
-	wslCache.Lock()
-	for k, v := range wslCache.m {
-		if time.Since(v.timestamp) > ttl {
-			wslCache.totalSize -= v.size
-			delete(wslCache.m, k)
-		}
+	if cacheable && err == nil {
+		storeWSLResult(distro, command, result)
 	}
-	for (wslCache.totalSize+resultSize > wslCache.maxSize ||
-		(wslCache.cleanupAt > 0 && len(wslCache.m) >= wslCache.cleanupAt)) && len(wslCache.m) > 0 {
-		var oldestKey string
-		var oldestTime time.Time
-		for k, v := range wslCache.m {
-			if oldestKey == "" || v.timestamp.Before(oldestTime) {
-				oldestKey = k
-				oldestTime = v.timestamp
-			}
-		}
-		if oldestKey != "" {
-			wslCache.totalSize -= wslCache.m[oldestKey].size
-			delete(wslCache.m, oldestKey)
-		}
-	}
-	wslCache.m[cacheKey] = wslCacheEntry{
-		output:    result,
-		err:       err,
-		timestamp: time.Now(),
-		size:      resultSize,
-	}
-	wslCache.totalSize += resultSize
-	wslCache.Unlock()
 
 	return result, err
 }
 
+func getCachedWSLResult(distro, command string) (string, bool) {
+	ttl := time.Duration(wslCacheTTL.Load()) * time.Second
+	key := distro + "\x00" + command
+	wslCache.RLock()
+	entry, ok := wslCache.m[key]
+	wslCache.RUnlock()
+	if !ok || time.Since(entry.timestamp) >= ttl {
+		return "", false
+	}
+	return entry.output, true
+}
+
+func storeWSLResult(distro, command, output string) {
+	ttl := time.Duration(wslCacheTTL.Load()) * time.Second
+	key := distro + "\x00" + command
+	size := int64(len(output))
+	wslCache.Lock()
+	defer wslCache.Unlock()
+	if wslCache.maxSize <= 0 || size > wslCache.maxSize {
+		return
+	}
+	for node := wslCache.order.Front(); node != nil; {
+		next := node.Next()
+		cacheKey := node.Value.(string)
+		entry, ok := wslCache.m[cacheKey]
+		if !ok {
+			wslCache.order.Remove(node)
+		} else if time.Since(entry.timestamp) >= ttl {
+			wslCache.totalSize -= entry.size
+			delete(wslCache.m, cacheKey)
+			wslCache.order.Remove(node)
+		} else {
+			break
+		}
+		node = next
+	}
+	for (wslCache.totalSize+size > wslCache.maxSize ||
+		(wslCache.cleanupAt > 0 && len(wslCache.m) >= wslCache.cleanupAt)) && len(wslCache.m) > 0 {
+		if !evictOldestWSLCacheEntryLocked() {
+			break
+		}
+	}
+	if old, ok := wslCache.m[key]; ok {
+		wslCache.totalSize -= old.size
+		if old.orderNode != nil {
+			wslCache.order.Remove(old.orderNode)
+		}
+	}
+	entry := wslCacheEntry{output: output, timestamp: time.Now(), size: size}
+	entry.orderNode = wslCache.order.PushBack(key)
+	wslCache.m[key] = entry
+	wslCache.totalSize += size
+}
+
+func evictOldestWSLCacheEntryLocked() bool {
+	oldest := wslCache.order.Front()
+	if oldest == nil {
+		return false
+	}
+	key := oldest.Value.(string)
+	if entry, ok := wslCache.m[key]; ok {
+		wslCache.totalSize -= entry.size
+		delete(wslCache.m, key)
+	}
+	wslCache.order.Remove(oldest)
+	return true
+}
+
 func RunWSLWithCancel(ctx context.Context, command string) (string, error) {
+	return runWSLWithCancel(ctx, command, false)
+}
+
+func RunWSLWithCancelCacheable(ctx context.Context, command string) (string, error) {
+	// Use only for read-only probes whose results are safe to reuse briefly.
+	return runWSLWithCancel(ctx, command, true)
+}
+
+func runWSLWithCancel(ctx context.Context, command string, cacheable bool) (string, error) {
 	if isBuildCommand(command) {
 		return executeWSLCommand(ctx, command, true)
 	}
@@ -915,15 +973,12 @@ func RunWSLWithCancel(ctx context.Context, command string) (string, error) {
 		return "", fmt.Errorf("WSL-дистрибутив не выбран или не найден")
 	}
 
-	wslCache.RLock()
-	ttl := time.Duration(wslCacheTTL.Load()) * time.Second
-	cacheKey := distro + "\x00" + command
-	if entry, ok := wslCache.m[cacheKey]; ok && time.Since(entry.timestamp) < ttl {
-		wslCache.RUnlock()
-		return entry.output, entry.err
+	if cacheable {
+		if output, ok := getCachedWSLResult(distro, command); ok {
+			return output, nil
+		}
 	}
-	wslCache.RUnlock()
-	return executeWSLCommand(ctx, command, false)
+	return executeWSLCommand(ctx, command, !cacheable)
 }
 
 func executeWSLCommand(ctx context.Context, command string, skipCache bool) (string, error) {
@@ -943,39 +998,8 @@ func executeWSLCommand(ctx context.Context, command string, skipCache bool) (str
 	result := strings.TrimSpace(decodeWSLOutput(filterWSLDiagnosticBytes(out.Bytes())))
 	errOutput := strings.TrimSpace(decodeWSLOutput(filterWSLDiagnosticBytes(stderr.Bytes())))
 
-	if ctx.Err() == nil && !skipCache {
-		resultSize := int64(len(result))
-		if resultSize < 1024*1024 {
-			wslCache.Lock()
-			cacheKey := distro + "\x00" + command
-			// Ключ мог остаться в кэше с истёкшим TTL — вычитаем размер
-			// старой записи, иначе totalSize будет завышаться.
-			if old, ok := wslCache.m[cacheKey]; ok {
-				wslCache.totalSize -= old.size
-			}
-			wslCache.m[cacheKey] = wslCacheEntry{
-				output:    result,
-				err:       err,
-				timestamp: time.Now(),
-				size:      resultSize,
-			}
-			wslCache.totalSize += resultSize
-			if len(wslCache.m) > 100 {
-				var oldest string
-				var oldestTime time.Time
-				for k, v := range wslCache.m {
-					if oldestTime.IsZero() || v.timestamp.Before(oldestTime) {
-						oldest = k
-						oldestTime = v.timestamp
-					}
-				}
-				if oldest != "" {
-					wslCache.totalSize -= wslCache.m[oldest].size
-					delete(wslCache.m, oldest)
-				}
-			}
-			wslCache.Unlock()
-		}
+	if ctx.Err() == nil && err == nil && !skipCache && len(result) < 1024*1024 {
+		storeWSLResult(distro, command, result)
 	}
 
 	if err != nil && errOutput != "" {
@@ -1130,9 +1154,9 @@ func isBuildCommand(command string) bool {
 
 func InvalidateWSLCache() {
 	wslCache.Lock()
-	for k := range wslCache.m {
-		delete(wslCache.m, k)
-	}
+	wslCache.m = make(map[string]wslCacheEntry)
+	wslCache.order.Init()
+	wslCache.totalSize = 0
 	wslCache.Unlock()
 }
 
@@ -1164,7 +1188,7 @@ func CheckService() map[string]interface{} {
 		status["nerdctl"] = true
 		return status
 	}
-	out, _ := RunWSL("echo '---'; which nerdctl 2>/dev/null")
+	out, _ := RunWSLCacheable("echo '---'; which nerdctl 2>/dev/null")
 	parts := strings.Split(out, "---")
 	if IsServiceActive(GetContainerdService()) {
 		status["containerd"] = true
@@ -1547,8 +1571,32 @@ func BuildAndRunProject(ctx context.Context, onLine func(string)) (string, error
 	return startProjectStackAsRoot(ctx, projectPath, onLine)
 }
 
-// formatBuildError упаковывает вывод сборки в человекочитаемую ошибку
-// (последние 30 строк + статус).
+type BuildError struct {
+	Output string
+	Status error
+	Hint   string
+}
+
+func (e *BuildError) Error() string {
+	if e == nil {
+		return i18n.T("build_error.title")
+	}
+	sections := []string{i18n.T("build_error.title")}
+	if output := strings.TrimSpace(e.Output); output != "" {
+		lines := strings.Split(output, "\n")
+		if len(lines) > 30 {
+			lines = lines[len(lines)-30:]
+		}
+		sections = append(sections, i18n.T("build_error.output_header")+"\n"+strings.Join(lines, "\n"))
+	} else if e.Hint != "" {
+		sections = append(sections, i18n.T("build_error.no_output"), e.Hint)
+	}
+	if e.Status != nil {
+		sections = append(sections, i18n.T("build_error.status", e.Status.Error()))
+	}
+	return strings.Join(sections, "\n\n")
+}
+
 func looksLikeBuildkitDaemonStartup(out string) bool {
 	if strings.TrimSpace(out) == "" {
 		return false
@@ -1593,26 +1641,15 @@ func looksLikeBuildkitDaemonStartup(out string) bool {
 }
 
 func formatBuildError(out string, err error) error {
-	errorMsg := "❌ Ошибка сборки\n\n"
-	if out != "" {
-		lines := strings.Split(out, "\n")
-		start := 0
-		if len(lines) > 30 {
-			start = len(lines) - 30
-		}
-		errorMsg += "Вывод (последние 30 строк):\n" + strings.Join(lines[start:], "\n") + "\n\n"
-	} else {
-		errorMsg += "WSL завершился с кодом ошибки, но в stdout/stderr не было полезного текста.\n"
-		errorMsg += "Это часто означает: buildkitd не запустился, CNI/сеть не инициализирована, или команда compose завершилась без диагностик.\n\n"
-		errorMsg += "Проверьте в WSL:\n"
-		errorMsg += "  - buildctl debug workers\n"
-		errorMsg += "  - ls -l /usr/lib/cni /opt/cni/bin 2>/dev/null\n"
-		errorMsg += "  - nerdctl compose config\n\n"
+	hint := ""
+	if strings.TrimSpace(out) == "" {
+		hint = i18n.T("build_error.default_hint")
 	}
-	if err != nil {
-		errorMsg += "Статус: " + err.Error()
+	return &BuildError{
+		Output: strings.TrimSpace(CleanWSLUserOutput(out)),
+		Status: err,
+		Hint:   hint,
 	}
-	return fmt.Errorf("%s", errorMsg)
 }
 
 func formatLaunchError(err error, out string) error {
@@ -1907,12 +1944,24 @@ func ListVolumes() ([]Volume, error) {
 	return CDListVolumes()
 }
 
+func GetVolumeSizes(ctx context.Context, volumes []Volume) map[string]string {
+	return CDGetVolumeSizes(ctx, volumes)
+}
+
 func RemoveVolume(name string) error {
 	return CDRemoveVolume(name)
 }
 
 func GetContainerLogs(id string, tail int) (string, error) {
 	return CDGetContainerLogs(id, tail)
+}
+
+func GetContainerLogsWithTimestamp(id string, tail int) (string, string, error) {
+	return CDGetContainerLogsWithTimestamp(id, tail)
+}
+
+func GetContainerLogEntriesSince(ctx context.Context, id, since string) ([]ContainerLogEntry, error) {
+	return CDGetContainerLogEntriesSince(ctx, id, since)
 }
 
 func GetContainerStartupLogs(id string, tail int) (string, error) {
@@ -1928,10 +1977,10 @@ func TranslateStatus(status string) string {
 	}
 	var result string
 	switch {
-	case strings.Contains(status, "healthy"):
-		result = i18n.T("container_status.healthy")
 	case strings.Contains(status, "unhealthy"):
 		result = i18n.T("container_status.unhealthy")
+	case strings.Contains(status, "healthy"):
+		result = i18n.T("container_status.healthy")
 	case strings.Contains(status, "running") || strings.Contains(status, "up"):
 		result = i18n.T("container_status.running")
 	case strings.Contains(status, "created"):
@@ -2192,6 +2241,13 @@ type SystemResources struct {
 	DiskFree  string
 }
 
+type ResourceSnapshot struct {
+	Stats     []ContainerStat
+	System    *SystemResources
+	StatsErr  error
+	SystemErr error
+}
+
 var sysResCache = struct {
 	sync.RWMutex
 	data      *SystemResources
@@ -2215,6 +2271,101 @@ func GetSystemResources() (*SystemResources, error) {
 	if err != nil {
 		return nil, err
 	}
+	result, err := parseSystemResources(out)
+	if err != nil {
+		return nil, err
+	}
+	sysResCache.Lock()
+	sysResCache.data = result
+	sysResCache.timestamp = time.Now()
+	sysResCache.Unlock()
+	return result, nil
+}
+
+func GetResourceSnapshot() ResourceSnapshot {
+	snapshot := ResourceSnapshot{}
+	cachedStats, statsCached := statsCache.Get()
+	if statsCached {
+		snapshot.Stats = cachedStats
+	}
+	sysResCache.RLock()
+	if sysResCache.data != nil && time.Since(sysResCache.timestamp) < 5*time.Second {
+		cachedResources := *sysResCache.data
+		snapshot.System = &cachedResources
+	}
+	sysResCache.RUnlock()
+	if statsCached && snapshot.System != nil {
+		GlobalCacheManager.RecordHit("stats")
+		return snapshot
+	}
+	GlobalCacheManager.RecordMiss("stats")
+
+	command := "printf '__RESOURCE_STATS_BEGIN__\\n'; " +
+		rootNerdctlCommand("stats --no-stream --format '{{json .}}'") +
+		" || printf '__RESOURCE_STATS_ERROR__\\n'; " +
+		"printf '\\n__RESOURCE_STATS_END__\\n'; " +
+		"printf '__SYSTEM_RESOURCES_BEGIN__\\n'; " +
+		"free -h | grep Mem; printf '\\n---CPU---\\n'; " +
+		"awk '/^processor[[:space:]]*:/ { count++ } END { print count+0 }' /proc/cpuinfo; " +
+		"cat /proc/loadavg; printf '\\n---DISK---\\n'; df -h / | tail -1; " +
+		"printf '\\n__SYSTEM_RESOURCES_END__\\n'"
+	out, err := RunWSLAsRootWithTimeout(command, 30*time.Second)
+	if err != nil {
+		if !statsCached {
+			snapshot.StatsErr = err
+			GlobalCacheManager.RecordError("stats")
+		}
+		if snapshot.System == nil {
+			snapshot.SystemErr = err
+		}
+		return snapshot
+	}
+
+	if !statsCached {
+		statsOutput, ok := extractResourceSection(out, "__RESOURCE_STATS_BEGIN__", "__RESOURCE_STATS_END__")
+		if !ok || strings.Contains(statsOutput, "__RESOURCE_STATS_ERROR__") {
+			snapshot.StatsErr = fmt.Errorf("не удалось получить статистику контейнеров")
+			GlobalCacheManager.RecordError("stats")
+		} else {
+			snapshot.Stats = parseContainerStatsOutput(statsOutput)
+			statsCache.Set(snapshot.Stats)
+		}
+	}
+
+	if snapshot.System == nil {
+		systemOutput, ok := extractResourceSection(out, "__SYSTEM_RESOURCES_BEGIN__", "__SYSTEM_RESOURCES_END__")
+		if !ok {
+			snapshot.SystemErr = fmt.Errorf("не удалось прочитать системные ресурсы")
+		} else {
+			resources, parseErr := parseSystemResources(systemOutput)
+			if parseErr != nil {
+				snapshot.SystemErr = parseErr
+			} else {
+				snapshot.System = resources
+				sysResCache.Lock()
+				sysResCache.data = resources
+				sysResCache.timestamp = time.Now()
+				sysResCache.Unlock()
+			}
+		}
+	}
+	return snapshot
+}
+
+func extractResourceSection(output, startMarker, endMarker string) (string, bool) {
+	start := strings.Index(output, startMarker)
+	if start < 0 {
+		return "", false
+	}
+	start += len(startMarker)
+	end := strings.Index(output[start:], endMarker)
+	if end < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(output[start : start+end]), true
+}
+
+func parseSystemResources(out string) (*SystemResources, error) {
 	parts := strings.Split(out, "---CPU---")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("не удалось распарсить системные ресурсы")
@@ -2257,10 +2408,6 @@ func GetSystemResources() (*SystemResources, error) {
 		DiskUsed:  diskUsed,
 		DiskFree:  diskFree,
 	}
-	sysResCache.Lock()
-	sysResCache.data = result
-	sysResCache.timestamp = time.Now()
-	sysResCache.Unlock()
 	return result, nil
 }
 
@@ -2328,7 +2475,7 @@ func UpdateContainerImage(id string, newImage string) (string, error) {
 	CDInvalidateImagesCache()
 
 	logs = append(logs, "⬇️  Загрузка нового образа: "+newImage)
-	pullOut, err := RunWSL(fmt.Sprintf("nerdctl pull %s", newImage))
+	pullOut, err := RunWSL(fmt.Sprintf("nerdctl pull %s", shellQuote(newImage)))
 	if err != nil {
 		return strings.Join(logs, "\n"), fmt.Errorf("не удалось загрузить образ: %w", err)
 	}
@@ -2365,7 +2512,7 @@ func UpdateContainerImage(id string, newImage string) (string, error) {
 	if mem := GetDefaultMemory(); mem != "" {
 		runCmd += fmt.Sprintf(" --memory=%s", mem)
 	}
-	runCmd += " " + newImage
+	runCmd += " " + shellQuote(newImage)
 	logs = append(logs, "🚀 Выполняю: "+runCmd)
 	_, err = RunWSL(runCmd)
 	if err != nil {

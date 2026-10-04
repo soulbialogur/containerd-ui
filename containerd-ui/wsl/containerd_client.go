@@ -1,10 +1,12 @@
 package wsl
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -155,11 +157,13 @@ func (c *boundedTypedCache[T]) Invalidate() {
 type stringCacheEntry struct {
 	value     string
 	timestamp time.Time
+	orderNode *list.Element
 }
 
 type boundedStringCache struct {
 	mu         sync.RWMutex
 	data       map[string]stringCacheEntry
+	order      *list.List
 	defaultTTL time.Duration
 	maxEntries int
 }
@@ -167,6 +171,7 @@ type boundedStringCache struct {
 func newBoundedStringCache(defaultTTL time.Duration, maxEntries int) *boundedStringCache {
 	return &boundedStringCache{
 		data:       make(map[string]stringCacheEntry, maxEntries),
+		order:      list.New(),
 		defaultTTL: defaultTTL,
 		maxEntries: maxEntries,
 	}
@@ -189,33 +194,45 @@ func (c *boundedStringCache) Set(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now()
-	for k, entry := range c.data {
-		if now.Sub(entry.timestamp) >= c.defaultTTL {
-			delete(c.data, k)
+	for node := c.order.Front(); node != nil; {
+		next := node.Next()
+		cachedKey := node.Value.(string)
+		entry, ok := c.data[cachedKey]
+		if !ok {
+			c.order.Remove(node)
+		} else if now.Sub(entry.timestamp) >= c.defaultTTL {
+			delete(c.data, cachedKey)
+			c.order.Remove(node)
+		} else {
+			break
 		}
+		node = next
+	}
+	if previous, ok := c.data[key]; ok {
+		c.order.Remove(previous.orderNode)
+		delete(c.data, key)
 	}
 	for len(c.data) >= c.maxEntries {
-		var oldestKey string
-		var oldestTime time.Time
-		for k, entry := range c.data {
-			if oldestKey == "" || entry.timestamp.Before(oldestTime) {
-				oldestKey = k
-				oldestTime = entry.timestamp
-			}
+		oldest := c.order.Front()
+		if oldest == nil {
+			break
 		}
-		if oldestKey != "" {
-			delete(c.data, oldestKey)
-		}
+		oldestKey := oldest.Value.(string)
+		delete(c.data, oldestKey)
+		c.order.Remove(oldest)
 	}
-	c.data[key] = stringCacheEntry{
+	entry := stringCacheEntry{
 		value:     value,
 		timestamp: now,
 	}
+	entry.orderNode = c.order.PushBack(key)
+	c.data[key] = entry
 }
 
 func (c *boundedStringCache) Invalidate() {
 	c.mu.Lock()
 	c.data = make(map[string]stringCacheEntry, c.maxEntries)
+	c.order.Init()
 	c.mu.Unlock()
 }
 
@@ -250,18 +267,36 @@ func (c *containerStatusStore) get(id string) (string, bool) {
 }
 
 func (c *containerStatusStore) set(id, status string) {
+	now := time.Now()
 	c.mu.Lock()
-	if len(c.data) >= c.maxLen {
-		keys := make([]string, 0, len(c.data))
-		for k := range c.data {
-			keys = append(keys, k)
-		}
-		for i := 0; i < len(keys)/2; i++ {
-			delete(c.data, keys[i])
+	defer c.mu.Unlock()
+	if c.maxLen <= 0 {
+		return
+	}
+	for key, entry := range c.data {
+		if now.Sub(entry.timestamp) > c.ttl {
+			delete(c.data, key)
 		}
 	}
-	c.data[id] = statusCacheEntry{status: status, timestamp: time.Now()}
-	c.mu.Unlock()
+	if _, exists := c.data[id]; !exists {
+		for len(c.data) >= c.maxLen {
+			var oldestID string
+			var oldestTimestamp time.Time
+			foundOldest := false
+			for key, entry := range c.data {
+				if !foundOldest || entry.timestamp.Before(oldestTimestamp) {
+					oldestID = key
+					oldestTimestamp = entry.timestamp
+					foundOldest = true
+				}
+			}
+			if !foundOldest {
+				break
+			}
+			delete(c.data, oldestID)
+		}
+	}
+	c.data[id] = statusCacheEntry{status: status, timestamp: now}
 }
 
 func (c *containerStatusStore) invalidate(id string) {
@@ -279,6 +314,7 @@ func (c *containerStatusStore) invalidateAll() {
 }
 
 const statusCacheTTL = 15 * time.Second
+const containerdHealthFailureLimit = 3
 
 var (
 	containersCache      = newTypedCache[[]Container](3 * time.Second)
@@ -301,9 +337,10 @@ var (
 	appCtx      context.Context
 	appCancel   context.CancelFunc
 
-	cdMu         sync.Mutex
-	cdIPValid    atomic.Bool
-	shutdownOnce sync.Once
+	cdMu             sync.Mutex
+	cdIPValid        atomic.Bool
+	cdHealthFailures atomic.Int32
+	shutdownOnce     sync.Once
 )
 
 func init() {
@@ -316,27 +353,40 @@ func DetectWSLIP() string {
 }
 
 func detectWSLIP(forceRefresh bool) string {
-	if !forceRefresh && cdIP != "" && cdIPValid.Load() {
-		return cdIP
+	if !forceRefresh {
+		cdMu.Lock()
+		cachedIP := cdIP
+		valid := cdIPValid.Load()
+		cdMu.Unlock()
+		if cachedIP != "" && valid {
+			return cachedIP
+		}
 	}
 	cmd := exec.Command(wslExecutable(), "-d", GetWslDistro(), "hostname", "-I")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()
 	if err != nil {
+		cdMu.Lock()
 		cdIPValid.Store(false)
+		cdMu.Unlock()
 		return ""
 	}
 	fields := strings.Fields(strings.TrimSpace(string(out)))
 	if len(fields) > 0 {
 		newIP := fields[0]
-		if newIP != cdIP {
-			cdIP = newIP
-			cdIPValid.Store(true)
+		cdMu.Lock()
+		changed := newIP != cdIP
+		cdIP = newIP
+		cdIPValid.Store(true)
+		cdMu.Unlock()
+		if changed {
 			resetCDClient()
 		}
-		return cdIP
+		return newIP
 	}
+	cdMu.Lock()
 	cdIPValid.Store(false)
+	cdMu.Unlock()
 	return ""
 }
 
@@ -352,11 +402,44 @@ func resetCDClient() {
 	cdClient = nil
 	cdErr = nil
 	cdAvailable.Store(false)
+	cdHealthFailures.Store(0)
+}
+
+func shouldResetCDClientAfterPing(pingErr error) bool {
+	if pingErr == nil {
+		cdHealthFailures.Store(0)
+		return false
+	}
+	if cdHealthFailures.Add(1) < containerdHealthFailureLimit {
+		return false
+	}
+	cdHealthFailures.Store(0)
+	return true
+}
+
+func resetCDClientAfterHealthFailure(client *cdclient.Client) {
+	cdMu.Lock()
+	defer cdMu.Unlock()
+	if cdClient != client {
+		return
+	}
+	if cdConn != nil {
+		cdConn.Close()
+		cdConn = nil
+	}
+	cdClient = nil
+	cdErr = nil
+	cdAvailable.Store(false)
+	cdHealthFailures.Store(0)
 }
 
 func getCDClient() (*cdclient.Client, error) {
-	if cdClient != nil && cdAvailable.Load() {
-		return cdClient, nil
+	cdMu.Lock()
+	cachedClient := cdClient
+	clientAvailable := cdAvailable.Load()
+	cdMu.Unlock()
+	if cachedClient != nil && clientAvailable {
+		return cachedClient, nil
 	}
 	ip := detectWSLIP(false)
 	if ip == "" {
@@ -373,8 +456,28 @@ func getCDClient() (*cdclient.Client, error) {
 		default:
 		}
 		addr := fmt.Sprintf("%s:%d", ip, GetCdPort())
+		var client *cdclient.Client
 		conn, err := grpc.NewClient(addr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply any, connection *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				callErr := invoker(ctx, method, req, reply, connection, opts...)
+				cdMu.Lock()
+				activeClient := client
+				cdMu.Unlock()
+				if strings.HasSuffix(method, "/Version") {
+					if shouldResetCDClientAfterPing(callErr) {
+						resetCDClientAfterHealthFailure(activeClient)
+					}
+				} else if callErr != nil && activeClient != nil {
+					pingCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+					_, pingErr := activeClient.Version(pingCtx)
+					cancel()
+					if shouldResetCDClientAfterPing(pingErr) {
+						resetCDClientAfterHealthFailure(activeClient)
+					}
+				}
+				return callErr
+			}),
 		)
 		if err != nil {
 			cdErr = err
@@ -387,7 +490,7 @@ func getCDClient() (*cdclient.Client, error) {
 			}
 			continue
 		}
-		client, err := cdclient.NewWithConn(conn,
+		client, err = cdclient.NewWithConn(conn,
 			cdclient.WithDefaultNamespace(GetCdNamespace()),
 		)
 		if err != nil {
@@ -416,6 +519,7 @@ func getCDClient() (*cdclient.Client, error) {
 		cdClient = client
 		cdErr = nil
 		cdAvailable.Store(true)
+		cdHealthFailures.Store(0)
 		cdMu.Unlock()
 		return cdClient, nil
 	}
@@ -441,11 +545,11 @@ func Shutdown() {
 		cdMu.Unlock()
 		cdIPValid.Store(false)
 
-		cmd := exec.Command(WslExecutable(), "--shutdown")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, WslExecutable(), "--shutdown")
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Start(); err == nil {
-			_ = cmd.Process.Release()
-		}
+		_ = cmd.Run()
 	})
 }
 
@@ -560,6 +664,12 @@ func CDGetStats() ([]ContainerStat, error) {
 		GlobalCacheManager.RecordError("stats")
 		return nil, err
 	}
+	result := parseContainerStatsOutput(out)
+	statsCache.Set(result)
+	return result, nil
+}
+
+func parseContainerStatsOutput(out string) []ContainerStat {
 	lines := strings.Split(out, "\n")
 	var result []ContainerStat
 	for _, line := range lines {
@@ -592,8 +702,7 @@ func CDGetStats() ([]ContainerStat, error) {
 			PIDs:   pids,
 		})
 	}
-	statsCache.Set(result)
-	return result, nil
+	return result
 }
 
 func shortContainerName(name string) string {
@@ -629,6 +738,131 @@ func CDGetContainerLogs(id string, tail int) (string, error) {
 		return "", fmt.Errorf("логи для контейнера %s не найдены", id)
 	}
 	return out, nil
+}
+
+func CDGetContainerLogsWithTimestamp(id string, tail int) (string, string, error) {
+	tailArg := "all"
+	if tail > 0 {
+		tailArg = strconv.Itoa(tail)
+	}
+	logsArgs := fmt.Sprintf("logs --timestamps --tail %s", tailArg)
+	startedAt, inspectErr := runRootNerdctl(context.Background(), fmt.Sprintf("inspect --format '{{.State.StartedAt}}' %s", shellQuote(id)))
+	if inspectErr == nil {
+		if normalizedStart := normalizeContainerStartTime(startedAt); normalizedStart != "" {
+			logsArgs += " --since " + shellQuote(normalizedStart)
+		}
+	}
+	out, err := runRootNerdctl(context.Background(), logsArgs+" "+shellQuote(id))
+	if err != nil {
+		if detail := strings.TrimSpace(out); detail != "" {
+			return "", "", fmt.Errorf("не удалось получить логи контейнера %s: %s", id, detail)
+		}
+		return "", "", err
+	}
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	lastTimestamp := ""
+	for index, line := range lines {
+		timestamp, message, ok := stripContainerLogTimestamp(line)
+		if !ok {
+			continue
+		}
+		lines[index] = message
+		lastTimestamp = timestamp
+	}
+	logs := strings.TrimSpace(strings.Join(lines, "\n"))
+	if _, err := time.Parse(time.RFC3339Nano, lastTimestamp); err != nil {
+		lastTimestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return logs, lastTimestamp, nil
+}
+
+type ContainerLogEntry struct {
+	Timestamp string
+	Message   string
+}
+
+func CDGetContainerLogEntriesSince(ctx context.Context, id, since string) ([]ContainerLogEntry, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("ID контейнера не может быть пустым")
+	}
+	since = normalizeContainerStartTime(since)
+	if since == "" {
+		return nil, fmt.Errorf("некорректная временная метка для обновления логов")
+	}
+
+	command := fmt.Sprintf("logs --timestamps --since %s %s", shellQuote(since), shellQuote(id))
+	out, err := runRootNerdctl(ctx, command)
+	if err != nil {
+		if detail := strings.TrimSpace(out); detail != "" {
+			return nil, fmt.Errorf("не удалось обновить логи контейнера %s: %s", id, detail)
+		}
+		return nil, err
+	}
+	return parseContainerLogEntries(out), nil
+}
+
+func parseContainerLogEntries(output string) []ContainerLogEntry {
+	var entries []ContainerLogEntry
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		timestamp, message, ok := splitContainerLogTimestamp(line)
+		if !ok {
+			entries = append(entries, ContainerLogEntry{Message: line})
+			continue
+		}
+		entries = append(entries, ContainerLogEntry{Timestamp: timestamp, Message: message})
+	}
+	return entries
+}
+
+func StreamContainerLogs(ctx context.Context, id, since string, onLine func(timestamp, message string)) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("ID контейнера не может быть пустым")
+	}
+	if since = normalizeContainerStartTime(since); since == "" {
+		return fmt.Errorf("некорректная временная метка для продолжения логов")
+	}
+
+	command := fmt.Sprintf("logs --follow --timestamps --since %s %s", shellQuote(since), shellQuote(id))
+	_, err := runWSLAsRootWithCancelStream(ctx, rootNerdctlCommand(command), func(line string) {
+		timestamp, message, ok := splitContainerLogTimestamp(line)
+		if !ok {
+			if onLine != nil {
+				onLine("", line)
+			}
+			return
+		}
+		if onLine != nil {
+			onLine(timestamp, message)
+		}
+	})
+	return err
+}
+
+func splitContainerLogTimestamp(line string) (string, string, bool) {
+	timestamp, message, ok := stripContainerLogTimestamp(line)
+	if !ok {
+		return "", strings.TrimSpace(line), false
+	}
+	if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+		return "", strings.TrimSpace(line), false
+	}
+	return timestamp, message, true
+}
+
+func stripContainerLogTimestamp(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	separator := strings.IndexByte(line, ' ')
+	if separator <= 0 {
+		return "", line, false
+	}
+	timestamp := line[:separator]
+	return timestamp, strings.TrimLeft(line[separator+1:], " "), true
 }
 
 func normalizeContainerStartTime(raw string) string {
@@ -744,9 +978,9 @@ func CDGetDBInfo(volumeName string) (string, []string, error) {
 	quotedDBPath := shellQuote(dbPath)
 	out, err := runWSLAsRootWithTimeout(fmt.Sprintf(
 		"if [ ! -d %s ]; then echo '===ERROR==='; echo \"Том не найден: %s\"; exit 1; fi; "+
-			"du -sh %s; echo '===FILES==='; "+
+			"%s; echo '===FILES==='; "+
 			"find %s -mindepth 1 -maxdepth 3 -printf '%%y\\t%%s\\t%%P\\n' | sort -k3 | head -n 500",
-		quotedDBPath, dbPath, quotedDBPath, quotedDBPath,
+		quotedDBPath, dbPath, duSizeCommand(dbPath), quotedDBPath,
 	), TimeoutMedium)
 	if err != nil {
 		details := strings.TrimSpace(out)
@@ -816,23 +1050,21 @@ func CDListContainers(all bool) ([]Container, error) {
 		if all {
 			return cached, nil
 		}
-		var running []Container
-		for _, c := range cached {
-			if isContainerRunning(c.Status) {
-				running = append(running, c)
-			}
-		}
-		return running, nil
+		return filterRunningContainers(cached), nil
 	}
-	return listContainersFallback(all)
+
+	containers, err := listContainersFallback()
+	if err != nil {
+		return nil, err
+	}
+	if all {
+		return containers, nil
+	}
+	return filterRunningContainers(containers), nil
 }
 
-func listContainersFallback(all bool) ([]Container, error) {
-	flag := ""
-	if all {
-		flag = "-a "
-	}
-	out, err := runRootNerdctl(context.Background(), "ps "+flag+"--format '{{json .}}' 2>/dev/null")
+func listContainersFallback() ([]Container, error) {
+	out, err := runRootNerdctl(context.Background(), "ps -a --format '{{json .}}' 2>/dev/null")
 	if err != nil {
 		return nil, err
 	}
@@ -855,13 +1087,20 @@ func listContainersFallback(all bool) ([]Container, error) {
 		if err := json.Unmarshal([]byte(line), &c); err != nil {
 			continue
 		}
-		if !all && !isContainerRunning(c.Status) {
-			continue
-		}
 		result = append(result, normalizeContainer(c.ID, c.Name, c.Image, c.Status, c.Ports))
 	}
 	containersCache.Set(result)
 	return result, nil
+}
+
+func filterRunningContainers(containers []Container) []Container {
+	running := make([]Container, 0, len(containers))
+	for _, container := range containers {
+		if isContainerRunning(container.Status) {
+			running = append(running, container)
+		}
+	}
+	return running
 }
 
 func normalizeContainer(id, name, image, status, ports string) Container {
@@ -871,7 +1110,26 @@ func normalizeContainer(id, name, image, status, ports string) Container {
 	if len(id) > 12 {
 		id = id[:12]
 	}
-	return Container{ID: id, Name: name, Image: image, Status: status, Ports: ports}
+	status, uptime, health := splitContainerStatus(status)
+	return Container{ID: id, Name: name, Image: image, Status: status, Uptime: uptime, Health: health, Ports: ports}
+}
+
+func splitContainerStatus(status string) (normalizedStatus, uptime, health string) {
+	normalizedStatus = strings.TrimSpace(status)
+	lowerStatus := strings.ToLower(normalizedStatus)
+	for _, state := range []string{"unhealthy", "healthy", "health: starting"} {
+		marker := "(" + state + ")"
+		if index := strings.LastIndex(lowerStatus, marker); index >= 0 {
+			health = state
+			normalizedStatus = strings.TrimSpace(normalizedStatus[:index] + normalizedStatus[index+len(marker):])
+			lowerStatus = strings.ToLower(normalizedStatus)
+			break
+		}
+	}
+	if strings.HasPrefix(lowerStatus, "up ") {
+		uptime = strings.TrimSpace(normalizedStatus[len("up "):])
+	}
+	return normalizedStatus, uptime, health
 }
 
 func isContainerRunning(status string) bool {
@@ -907,7 +1165,7 @@ func determineContainerStatus(client *cdclient.Client, ctx context.Context, id s
 }
 
 func getContainerStatusesBatch() (map[string]string, error) {
-	out, err := RunWSL("nerdctl ps -a --format '{{.ID}}\t{{.Status}}' 2>/dev/null")
+	out, err := RunWSLCacheable("nerdctl ps -a --format '{{.ID}}\t{{.Status}}' 2>/dev/null")
 	if err != nil || out == "" {
 		return nil, err
 	}
@@ -972,7 +1230,67 @@ func parseImageLine(line string) (Image, error) {
 	if err := json.Unmarshal([]byte(line), &img); err != nil {
 		return Image{}, err
 	}
+	img.CreatedAt = normalizeImageCreatedAt(img.CreatedAt)
+	img.Size = normalizeImageSize(img.Size)
 	return img, nil
+}
+
+var imageSizePattern = regexp.MustCompile(`(?i)^([0-9]+(?:\.[0-9]+)?)\s*([kmgtpe])((?:i?b)?)$`)
+
+func normalizeImageSize(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "—"
+	}
+	if bytes, err := strconv.ParseInt(raw, 10, 64); err == nil && bytes >= 0 {
+		return humanImageSize(float64(bytes))
+	}
+	parts := imageSizePattern.FindStringSubmatch(raw)
+	if parts == nil {
+		return raw
+	}
+	value, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return raw
+	}
+	unit := strings.ToUpper(parts[2])
+	if strings.HasPrefix(strings.ToLower(parts[3]), "i") {
+		unit += "iB"
+	} else {
+		unit += "B"
+	}
+	return fmt.Sprintf("%s %s", trimImageSizeNumber(value), unit)
+}
+
+func humanImageSize(bytes float64) string {
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+	unit := 0
+	for bytes >= 1024 && unit < len(units)-1 {
+		bytes /= 1024
+		unit++
+	}
+	return fmt.Sprintf("%s %s", trimImageSizeNumber(bytes), units[unit])
+}
+
+func trimImageSizeNumber(value float64) string {
+	formatted := strconv.FormatFloat(value, 'f', 2, 64)
+	return strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+}
+
+func normalizeImageCreatedAt(raw string) string {
+	raw = strings.TrimSpace(raw)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05 MST",
+		"2006-01-02 15:04:05",
+	} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.Format(time.RFC3339Nano)
+		}
+	}
+	return raw
 }
 
 func getImageSizes(ctx context.Context, imgs []images.Image) map[string]int64 {
@@ -1072,6 +1390,41 @@ func CDListVolumes() ([]Volume, error) {
 	result := parseVolumeLines(out)
 	volumesCache.Set(result)
 	return result, nil
+}
+
+func CDGetVolumeSizes(ctx context.Context, volumes []Volume) map[string]string {
+	sizes := make(map[string]string, len(volumes))
+	if ctx.Err() != nil || len(volumes) == 0 {
+		return sizes
+	}
+
+	var script strings.Builder
+	for _, volume := range volumes {
+		mountpoint := strings.TrimSpace(volume.Mountpoint)
+		if volume.Name == "" || mountpoint == "" {
+			continue
+		}
+		fmt.Fprintf(&script, "printf '%%s\\t' %s; %s\n", shellQuote(volume.Name), duSizeCommand(mountpoint))
+	}
+	if script.Len() == 0 || ctx.Err() != nil {
+		return sizes
+	}
+
+	output, err := runWSLAsRootWithCancelStream(ctx, script.String(), nil)
+	if err != nil || ctx.Err() != nil {
+		return sizes
+	}
+	for _, line := range strings.Split(output, "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), "\t", 2)
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			sizes[parts[0]] = parts[1]
+		}
+	}
+	return sizes
+}
+
+func duSizeCommand(path string) string {
+	return "du -sh -- " + shellQuote(path) + " 2>/dev/null | cut -f1"
 }
 
 // parseVolumeLines разбирает вывод "nerdctl volume ls --format '{{json .}}'",
