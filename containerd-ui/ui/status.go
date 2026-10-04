@@ -5,12 +5,12 @@ import (
 	"containerd-ui/wsl"
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,7 +30,38 @@ var systemMetrics = struct {
 	data: make(map[string]string),
 }
 
+func systemMetricsSnapshot() map[string]string {
+	systemMetrics.RLock()
+	defer systemMetrics.RUnlock()
+	result := make(map[string]string, len(systemMetrics.data))
+	for key, value := range systemMetrics.data {
+		result[key] = value
+	}
+	return result
+}
+
+func storeSystemMetrics(ctx context.Context, result map[string]string) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	systemMetrics.Lock()
+	defer systemMetrics.Unlock()
+	if ctx.Err() != nil {
+		return false
+	}
+	for key, value := range result {
+		systemMetrics.data[key] = value
+	}
+	systemMetrics.timestamp = time.Now()
+	return true
+}
+
 func getSystemMetrics() map[string]string {
+	ctx := wsl.AppContext()
+	if ctx.Err() != nil {
+		return systemMetricsSnapshot()
+	}
+
 	systemMetrics.RLock()
 	if time.Since(systemMetrics.timestamp) < systemMetrics.ttl {
 		result := make(map[string]string, len(systemMetrics.data))
@@ -41,6 +72,9 @@ func getSystemMetrics() map[string]string {
 		return result
 	}
 	systemMetrics.RUnlock()
+	if ctx.Err() != nil {
+		return systemMetricsSnapshot()
+	}
 
 	script := "" +
 		"printf 'CONTAINERS_TOTAL;'; nerdctl ps -a --format '{{.ID}}' 2>/dev/null | wc -l; " +
@@ -49,67 +83,54 @@ func getSystemMetrics() map[string]string {
 		"printf 'VOLUMES;'; nerdctl volume ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l; " +
 		"printf 'NETWORKS;'; nerdctl network ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l"
 
+	if ctx.Err() != nil {
+		return systemMetricsSnapshot()
+	}
 	out, err := wsl.RunWSLAsRootWithTimeout(script, 15*time.Second)
+	if ctx.Err() != nil {
+		return systemMetricsSnapshot()
+	}
 	if err != nil {
-		result := map[string]string{
-			"containers_total": "—", "containers_running": "—",
-			"images": "—", "volumes": "—", "networks": "—",
+		result := emptySystemMetrics()
+		if !storeSystemMetrics(ctx, result) {
+			return systemMetricsSnapshot()
 		}
-		systemMetrics.Lock()
-		for k, v := range result {
-			systemMetrics.data[k] = v
-		}
-		systemMetrics.timestamp = time.Now()
-		systemMetrics.Unlock()
 		return result
 	}
 
-	result := make(map[string]string)
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "CONTAINERS_TOTAL;"):
-			result["containers_total"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_TOTAL;"))
-		case strings.HasPrefix(line, "CONTAINERS_RUNNING;"):
-			result["containers_running"] = strings.TrimSpace(strings.TrimPrefix(line, "CONTAINERS_RUNNING;"))
-		case strings.HasPrefix(line, "IMAGES;"):
-			result["images"] = strings.TrimSpace(strings.TrimPrefix(line, "IMAGES;"))
-		case strings.HasPrefix(line, "VOLUMES;"):
-			result["volumes"] = strings.TrimSpace(strings.TrimPrefix(line, "VOLUMES;"))
-		case strings.HasPrefix(line, "NETWORKS;"):
-			result["networks"] = strings.TrimSpace(strings.TrimPrefix(line, "NETWORKS;"))
-		}
-	}
+	result := parseSystemMetricsOutput(out)
 
-	if result["containers_total"] == "" {
-		result["containers_total"] = "—"
+	if !storeSystemMetrics(ctx, result) {
+		return systemMetricsSnapshot()
 	}
-	if result["containers_running"] == "" {
-		result["containers_running"] = "—"
-	}
-	if result["images"] == "" {
-		result["images"] = "—"
-	}
-	if result["volumes"] == "" {
-		result["volumes"] = "—"
-	}
-	if result["networks"] == "" {
-		result["networks"] = "—"
-	}
-
-	systemMetrics.Lock()
-	for k, v := range result {
-		systemMetrics.data[k] = v
-	}
-	systemMetrics.timestamp = time.Now()
-	systemMetrics.Unlock()
 
 	return result
 }
 
+func emptySystemMetrics() map[string]string {
+	return map[string]string{
+		"containers_total": "—", "containers_running": "—",
+		"images": "—", "volumes": "—", "networks": "—",
+	}
+}
+
+func parseSystemMetricsOutput(output string) map[string]string {
+	result := emptySystemMetrics()
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		for _, metric := range []string{"CONTAINERS_TOTAL", "CONTAINERS_RUNNING", "IMAGES", "VOLUMES", "NETWORKS"} {
+			prefix := metric + ";"
+			if strings.HasPrefix(line, prefix) {
+				key := strings.ToLower(metric)
+				result[key] = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+				break
+			}
+		}
+	}
+	return result
+}
+
 type metricCard struct {
-	label      *widget.Label
 	value      *widget.Button
 	title      string
 	icon       string
@@ -124,15 +145,13 @@ func SetStatusMetricNavigation(navigate func(string)) {
 }
 
 func newMetricCard(title, icon, navigateTo string) *metricCard {
-	lbl := widget.NewLabel("—")
-	lbl.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
 	value := widget.NewButton("—", func() {
 		if statusMetricNavigation != nil {
 			statusMetricNavigation(navigateTo)
 		}
 	})
 	value.Importance = widget.LowImportance
-	return &metricCard{label: lbl, value: value, title: title, icon: icon, navigateTo: navigateTo}
+	return &metricCard{value: value, title: title, icon: icon, navigateTo: navigateTo}
 }
 
 func (mc *metricCard) widget() fyne.CanvasObject {
@@ -146,17 +165,14 @@ func (mc *metricCard) widget() fyne.CanvasObject {
 
 func (mc *metricCard) setValue(val string) {
 	mc.content = val
-	mc.label.SetText(val)
 	mc.value.SetText(val)
 }
 
 func (mc *metricCard) setLoading(loading bool) {
 	if loading {
-		mc.label.SetText("...")
 		mc.value.SetText("...")
 		return
 	}
-	mc.label.SetText(mc.content)
 	mc.value.SetText(mc.content)
 }
 
@@ -200,23 +216,14 @@ func getAllComponentsStatus() []ComponentStatus {
 	}
 	statusCache.RUnlock()
 
-	svcName := wsl.GetContainerdService()
-	buildkitOK := wsl.CheckBuildkitd()
-	cmd := "" +
-		"echo 'WSL_CHECK_START'; " +
-		"uname -r 2>/dev/null | grep -qi microsoft && echo 'WSL:OK' || echo 'WSL:NO'; " +
-		"" + wsl.IsServiceActiveCommand(svcName) + " && echo 'CONTAINERD:OK' || echo 'CONTAINERD:NO'; " +
-		"which nerdctl > /dev/null 2>&1 && echo 'NERDCTL:OK' || echo 'NERDCTL:NO'; " +
-		"echo 'WSL_CHECK_END'"
-	if buildkitOK {
-		cmd = "echo 'BUILDKIT:OK'; " + cmd
-	} else {
-		cmd = "echo 'BUILDKIT:NO'; " + cmd
+	out, err := wsl.RunWSLAsRootWithTimeout(statusSnapshotScript(wsl.GetContainerdService()), 30*time.Second)
+	metrics := emptySystemMetrics()
+	if err == nil {
+		metrics = parseSystemMetricsOutput(out)
 	}
+	storeSystemMetrics(wsl.AppContext(), metrics)
 
-	out, err := runWSLWithTimeout(cmd, 15*time.Second)
-
-	versions := getComponentVersions()
+	versions := getComponentVersions(out)
 	distro := wsl.GetWslDistro()
 	if distro != "" {
 		wslVersion := versions["WSL"]
@@ -236,19 +243,10 @@ func getAllComponentsStatus() []ComponentStatus {
 			{Name: "Nerdctl", Version: versions["Nerdctl"], Icon: "❌", Active: false, Detail: i18n.T("status.detail_unavailable")},
 		}
 	} else {
+		result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "✅", Active: true, Detail: i18n.T("status.detail_active")})
 		lines := strings.Split(out, "\n")
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
-
-			if strings.Contains(line, "WSL_CHECK_START") || strings.Contains(line, "WSL_CHECK_END") {
-				continue
-			}
-
-			if strings.Contains(line, "WSL:OK") {
-				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "✅", Active: true, Detail: i18n.T("status.detail_active")})
-			} else if strings.Contains(line, "WSL:NO") {
-				result = append(result, ComponentStatus{Name: "WSL", Version: distro, Icon: "⚠️", Active: false, Detail: i18n.T("status.detail_stopped")})
-			}
 
 			if strings.Contains(line, "CONTAINERD:OK") {
 				result = append(result, ComponentStatus{Name: "Containerd", Version: versions["Containerd"], Icon: "✅", Active: true, Detail: i18n.T("status.detail_grpc")})
@@ -278,32 +276,50 @@ func getAllComponentsStatus() []ComponentStatus {
 	return result
 }
 
+func compactComponentStatus(status ComponentStatus) string {
+	if status.Name == "WSL" && status.Version != "" {
+		return status.Icon + " " + status.Version
+	}
+	return status.Icon + " " + status.Detail
+}
+
+func fullComponentStatus(status ComponentStatus) string {
+	text := status.Icon
+	if status.Version != "" {
+		text += " " + status.Version
+	}
+	if status.Detail != "" && status.Name != "WSL" {
+		text += " (" + status.Detail + ")"
+	}
+	return text
+}
+
+func statusSnapshotScript(service string) string {
+	return strings.Join([]string{
+		`export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"`,
+		wsl.IsServiceActiveCommand(service) + ` && echo 'CONTAINERD:OK' || echo 'CONTAINERD:NO'`,
+		`if command -v buildctl >/dev/null 2>&1 && [ -S /run/buildkit/buildkitd.sock ] && buildctl --addr ` + wsl.BuildkitHostAddr() + ` debug workers </dev/null >/dev/null 2>&1; then echo 'BUILDKIT:OK'; else echo 'BUILDKIT:NO'; fi`,
+		`command -v nerdctl >/dev/null 2>&1 && echo 'NERDCTL:OK' || echo 'NERDCTL:NO'`,
+		`echo 'WSL_CHECK_END'`,
+		`echo "CONTAINERD_VERSION=$(containerd --version 2>/dev/null || /usr/local/bin/containerd --version 2>/dev/null || /usr/bin/containerd --version 2>/dev/null || true)"`,
+		`echo "BUILDKIT_VERSION=$(buildctl --version 2>/dev/null || /usr/local/bin/buildctl --version 2>/dev/null || /usr/bin/buildctl --version 2>/dev/null || true)"`,
+		`echo "NERDCTL_VERSION=$(nerdctl --version 2>/dev/null || /usr/local/bin/nerdctl --version 2>/dev/null || /usr/bin/nerdctl --version 2>/dev/null || true)"`,
+		`printf 'CONTAINERS_TOTAL;'; nerdctl ps -a --format '{{.ID}}' 2>/dev/null | wc -l`,
+		`printf 'CONTAINERS_RUNNING;'; nerdctl ps --format '{{.ID}}' 2>/dev/null | wc -l`,
+		`printf 'IMAGES;'; nerdctl images --format '{{.ID}}' 2>/dev/null | wc -l`,
+		`printf 'VOLUMES;'; nerdctl volume ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l`,
+		`printf 'NETWORKS;'; nerdctl network ls --format '{{.Name}}' 2>/dev/null | grep -v '^$' | wc -l`,
+	}, "\n")
+}
+
 type versionEntry struct {
 	version string
 	ok      bool
 }
 
-func getComponentVersions() map[string]string {
+func getComponentVersions(output string) map[string]string {
 	versions := map[string]string{"WSL": getWindowsWslVersion()}
-
-	script := `export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
-echo "CONTAINERD_VERSION=$(containerd --version 2>/dev/null || /usr/local/bin/containerd --version 2>/dev/null || /usr/bin/containerd --version 2>/dev/null || true)"
-echo "BUILDKIT_VERSION=$(buildctl --version 2>/dev/null || /usr/local/bin/buildctl --version 2>/dev/null || /usr/bin/buildctl --version 2>/dev/null || true)"
-echo "NERDCTL_VERSION=$(nerdctl --version 2>/dev/null || /usr/local/bin/nerdctl --version 2>/dev/null || /usr/bin/nerdctl --version 2>/dev/null || true)"`
-
-	out, err := wsl.RunWSLAsRootWithTimeout(script, 30*time.Second)
-	if err != nil {
-		// Скрипт завершается с exit 0 благодаря финальному `true`,
-		// но на всякий случай не теряем частичный вывод.
-		if strings.TrimSpace(out) == "" {
-			versions["Containerd"] = "—"
-			versions["Buildkitd"] = "—"
-			versions["Nerdctl"] = "—"
-			return versions
-		}
-	}
-
-	for key, version := range parseComponentVersions(out) {
+	for key, version := range parseComponentVersions(output) {
 		versions[key] = version
 	}
 
@@ -336,16 +352,32 @@ func parseComponentVersions(output string) map[string]string {
 	return versions
 }
 
+var windowsWslVersionCache = struct {
+	sync.Mutex
+	value   string
+	expires time.Time
+}{}
+
 func getWindowsWslVersion() string {
+	windowsWslVersionCache.Lock()
+	defer windowsWslVersionCache.Unlock()
+	if time.Now().Before(windowsWslVersionCache.expires) {
+		return windowsWslVersionCache.value
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, wsl.WslExecutable(), "--version")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	output, err := cmd.Output()
 	if err != nil {
-		return "—"
+		windowsWslVersionCache.value = "—"
+		windowsWslVersionCache.expires = time.Now().Add(15 * time.Second)
+		return windowsWslVersionCache.value
 	}
-	return parseWindowsWslVersion(string(output))
+	windowsWslVersionCache.value = parseWindowsWslVersion(string(output))
+	windowsWslVersionCache.expires = time.Now().Add(time.Hour)
+	return windowsWslVersionCache.value
 }
 
 func parseWindowsWslVersion(output string) string {
@@ -364,10 +396,6 @@ func shortVersion(raw string) string {
 			return match[0]
 		}
 		return "v" + match[1]
-	}
-	parts := strings.Fields(raw)
-	if len(parts) >= 2 {
-		return parts[0] + " " + parts[1]
 	}
 	return raw
 }
@@ -413,7 +441,7 @@ func runtimeComponentsAreInstalled(output string, environment wsl.Environment) b
 	return wsl.AlpineToolchainVersionsSupported(nerdctlVersion, buildkitVersion)
 }
 
-var installInProgress = false
+var installInProgress atomic.Bool
 var installCancel context.CancelFunc
 
 // checkNetwork проверяет доступность интернета
@@ -432,45 +460,38 @@ func checkNetwork() bool {
 
 func installAllComponents(win fyne.Window) {
 	// Если установка уже идёт — ничего не делаем
-	if installInProgress {
+	if installInProgress.Load() {
+		return
+	}
+
+	selectedDistro := strings.TrimSpace(wsl.GetWslDistro())
+	if selectedDistro == "" {
+		showAppInfo(win, i18n.T("status.install_all_title"), i18n.T("status.install_bundled_distro_required", wsl.GetDefaultWslDistroName()))
 		return
 	}
 
 	// Проверяем, установлены ли уже все компоненты
 	if areAllComponentsInstalled() {
-		dialog.ShowInformation(
-			i18n.T("status.install_all_title"),
-			i18n.T("status.install_all_already_installed"),
-			win,
-		)
+		showAppInfo(win, i18n.T("status.install_all_title"), i18n.T("status.install_all_already_installed"))
 		return
 	}
 
 	// Проверяем что уже есть, чтобы не устанавливать заново
-	selectedDistro := strings.TrimSpace(wsl.GetWslDistro())
-	wslInstalled := selectedDistro != ""
 	distroName := selectedDistro
 	containersInstalled := false
-	if distroName == "" {
-		distroName = wsl.GetDefaultWslDistroName()
-	}
 
 	out, _ := runWSLWithTimeout(runtimeComponentsProbeScript(), 10*time.Second)
 	containersInstalled = runtimeComponentsAreInstalled(out, wsl.CurrentEnvironment())
 
 	// Показываем диалог подтверждения с информацией о том что будет установлено
-	confirmMsg := "Вы уверены, что хотите установить компоненты?\n\n"
-	if !wslInstalled {
-		confirmMsg += i18n.T("status.distro_will_install", distroName)
-	} else {
-		confirmMsg += i18n.T("status.distro_installed", distroName)
-	}
+	confirmMsg := i18n.T("status.install_all_confirm_intro")
+	confirmMsg += i18n.T("status.distro_installed", distroName)
 	if !containersInstalled {
-		confirmMsg += "• containerd, nerdctl, BuildKit — будут установлены\n"
+		confirmMsg += i18n.T("status.runtime_components_will_install")
 	} else {
-		confirmMsg += "• containerd, nerdctl, BuildKit — уже установлены ✓\n"
+		confirmMsg += i18n.T("status.runtime_components_installed")
 	}
-	confirmMsg += "\nЭто займёт несколько минут. Продолжить?"
+	confirmMsg += i18n.T("status.install_all_confirm_continue")
 
 	dialog.ShowCustomConfirm(
 		i18n.T("status.install_all_confirm_title"),
@@ -515,42 +536,20 @@ func installAllComponents(win fyne.Window) {
 
 			// Запускаем установку в фоне
 			go func() {
-				installInProgress = true
+				if !installInProgress.CompareAndSwap(false, true) {
+					return
+				}
 				defer func() {
-					installInProgress = false
+					installInProgress.Store(false)
 				}()
 
 				var logs []string
 				wslSuccess := false
 				installSuccess := false
 
-				// Шаг 1: Alpine WSL — только если не установлен
-				if !wslInstalled {
-					installDistroMessage := i18n.T("status.install_wsl_distro", distroName)
-					progressLabel.SetText(installDistroMessage)
-					logs = append(logs, "📦 "+installDistroMessage)
-
-					// Быстрый таймаут для WSL установки
-					wslCtx, wslCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					defer wslCancel()
-
-					wslCmd := exec.CommandContext(wslCtx, wsl.WslExecutable(), "--install", "--distribution", distroName)
-					wslCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-					wslOut, wslErr := wslCmd.CombinedOutput()
-
-					if wslCtx.Err() == context.DeadlineExceeded {
-						logs = append(logs, "  ❌ Таймаут: WSL установка не отвечает более 2 минут")
-					} else if wslErr != nil {
-						logs = append(logs, fmt.Sprintf("  ⚠️ WSL/%s: %s", distroName, strings.TrimSpace(string(wslOut))))
-					} else {
-						wsl.InvalidateEnvironmentCache()
-						logs = append(logs, fmt.Sprintf("  ✅ WSL/%s установлен", distroName))
-						wslSuccess = true
-					}
-				} else {
-					logs = append(logs, "📦 WSL2 + "+distroName+" — уже установлен, пропускаем")
-					wslSuccess = true
-				}
+				// The bundled distro is installed by the offline setup executable, not the Store.
+				logs = append(logs, i18n.T("status.install_wsl_already_installed", distroName))
+				wslSuccess = true
 
 				// Шаг 2: Проверяем сеть перед установкой пакетов
 				if !containersInstalled {
@@ -560,13 +559,11 @@ func installAllComponents(win fyne.Window) {
 					// Проверяем сеть
 					if !checkNetwork() {
 						cancel()
-						logs = append(logs, "  ❌ Нет подключения к интернету\n\n"+
-							"Установка невозможна без доступа к репозиториям.\n"+
-							"Проверьте сетевое подключение и попробуйте снова.")
+						logs = append(logs, i18n.T("status.install_network_unavailable"))
 
 						fyne.Do(func() {
 							dlg.Hide()
-							dialog.ShowError(errors.New(logs[len(logs)-1]), win)
+							showAppError(win, errors.New(logs[len(logs)-1]))
 						})
 						return
 					}
@@ -587,17 +584,16 @@ func installAllComponents(win fyne.Window) {
 						output := strings.TrimSpace(string(out))
 
 						if installCtx.Err() == context.Canceled {
-							logs = append(logs, "  ⏹ Установка отменена пользователем")
+							logs = append(logs, i18n.T("status.install_cancelled"))
 						} else if installCtx.Err() == context.DeadlineExceeded {
-							logs = append(logs, "  ❌ Таймаут: установка пакетов не завершилась вовремя")
+							logs = append(logs, i18n.T("status.install_package_timeout"))
 						} else if err != nil {
 							if strings.Contains(strings.ToLower(output), "could not resolve") ||
 								strings.Contains(strings.ToLower(output), "temporary failure") ||
 								strings.Contains(strings.ToLower(output), "network is unreachable") {
-								logs = append(logs, "  ❌ Ошибка сети: не удалось подключиться к репозиториям\n\n"+
-									"Проверьте подключение к интернету и попробуйте снова.")
+								logs = append(logs, i18n.T("status.install_network_error"))
 							} else {
-								logs = append(logs, fmt.Sprintf("  ❌ Ошибка установки: %v", err))
+								logs = append(logs, i18n.T("status.install_package_error", err))
 							}
 							if output != "" {
 								lines := strings.Split(output, "\n")
@@ -609,12 +605,12 @@ func installAllComponents(win fyne.Window) {
 							}
 						} else {
 							wsl.InvalidateEnvironmentCache()
-							logs = append(logs, "  ✅ containerd, nerdctl, BuildKit установлены")
+							logs = append(logs, i18n.T("status.install_runtime_success"))
 							installSuccess = true
 						}
 					}
 				} else {
-					logs = append(logs, "\n📦 containerd, nerdctl, BuildKit — уже установлены, пропускаем")
+					logs = append(logs, "\n"+i18n.T("status.install_runtime_already_installed"))
 					installSuccess = true
 				}
 
@@ -632,13 +628,13 @@ func installAllComponents(win fyne.Window) {
 
 					if wslSuccess && installSuccess {
 						// Всё успешно — показываем сообщение об успехе
-						dialog.ShowInformation(i18n.T("status.install_all_success"), resultMsg, win)
+						showAppInfo(win, i18n.T("status.install_all_success"), resultMsg)
 					} else if wslSuccess || installSuccess {
 						// Частичный успех
-						dialog.ShowInformation(i18n.T("status.install_all_partial"), resultMsg, win)
+						showAppInfo(win, i18n.T("status.install_all_partial"), resultMsg)
 					} else {
 						// Полная ошибка — показываем ошибку, а не скрываем
-						dialog.ShowError(errors.New(resultMsg), win)
+						showAppError(win, errors.New(resultMsg))
 					}
 				})
 			}()
@@ -651,9 +647,18 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	var updateMu sync.Mutex
 
 	wslCard := newResponsiveStatusCard("WSL")
+	if distro := wsl.GetWslDistro(); distro != "" {
+		wslCard.SetStatus(
+			"⏳ "+distro+" ("+i18n.T("common.loading")+")",
+			"⏳ "+distro,
+		)
+	}
 	containerdCard := newResponsiveStatusCard("Containerd")
+	containerdCard.SetStatus("⏳ "+i18n.T("common.loading"), "⏳ "+i18n.T("common.loading"))
 	buildkitdCard := newResponsiveStatusCard("Buildkitd")
+	buildkitdCard.SetStatus("⏳ "+i18n.T("common.loading"), "⏳ "+i18n.T("common.loading"))
 	nerdctlCard := newResponsiveStatusCard("Nerdctl")
+	nerdctlCard.SetStatus("⏳ "+i18n.T("common.loading"), "⏳ "+i18n.T("common.loading"))
 
 	metrics := map[string]*metricCard{
 		"containers_running": newMetricCard(i18n.T("status.metric_containers"), "📦", i18n.T("tabs.containers")),
@@ -697,14 +702,8 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 		safeUI(func() {
 			setLoading(false)
 			for _, cs := range statuses {
-				statusText := cs.Icon
-				if cs.Version != "" {
-					statusText += " " + cs.Version
-				}
-				if cs.Detail != "" {
-					statusText += " (" + wsl.TranslateStatus(cs.Detail) + ")"
-				}
-				compactStatus := cs.Icon + " " + wsl.TranslateStatus(cs.Detail)
+				statusText := fullComponentStatus(cs)
+				compactStatus := compactComponentStatus(cs)
 
 				switch cs.Name {
 				case "WSL":
@@ -733,9 +732,10 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	tab := newTabActive(false, time.Duration(wsl.GetAutoRefreshInterval())*time.Second, func() {
 		updateUI()
 	})
+	tab.SetAutoRefreshEnabled(false)
 
 	autoRefresh := widget.NewCheck(i18n.T("status.auto_refresh"), func(checked bool) {
-		tab.SetActive(checked)
+		tab.SetAutoRefreshEnabled(checked)
 	})
 
 	var btnStartBuildkitd *widget.Button
@@ -744,8 +744,8 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	btnStartBuildkitd = widget.NewButton(i18n.T("status.start_buildkitd"), func() {
 		btnStartBuildkitd.Disable()
 		btnStopBuildkitd.Disable()
-		buildkitdCard.SetStatus("⏳ Запуск Buildkitd...", "⏳ Запуск...")
-		lastCheckLabel.SetText("⏳ Запуск Buildkitd...")
+		buildkitdCard.SetStatus(i18n.T("status.buildkit_starting"), i18n.T("status.buildkit_starting_compact"))
+		lastCheckLabel.SetText(i18n.T("status.buildkit_starting"))
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
@@ -759,7 +759,7 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 
 			if err := wsl.StartBuildkitd(); err != nil {
 				safeUI(func() {
-					buildkitdCard.SetStatus("❌ Ошибка запуска: "+err.Error(), "❌ Ошибка запуска")
+					buildkitdCard.SetStatus(i18n.T("status.buildkit_start_error", err.Error()), i18n.T("status.buildkit_start_error_compact"))
 					lastCheckLabel.SetText(i18n.T("common.error") + ": " + err.Error())
 					btnStartBuildkitd.Enable()
 					btnStopBuildkitd.Enable()
@@ -768,13 +768,13 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 				// возвращаем штатную подпись.
 				time.AfterFunc(15*time.Second, func() {
 					safeUI(func() {
-						buildkitdCard.SetStatus("⚠️ Buildkitd остановлен", "⚠️ Остановлен")
+						buildkitdCard.SetStatus(i18n.T("status.buildkit_stopped"), i18n.T("status.buildkit_stopped_compact"))
 						lastCheckLabel.SetText(i18n.T("status.last_check", time.Now().Format("15:04:05")))
 					})
 				})
 			} else {
 				safeUI(func() {
-					buildkitdCard.SetStatus("✅ Buildkitd запущен", "✅ Активен")
+					buildkitdCard.SetStatus(i18n.T("status.buildkit_started"), i18n.T("status.buildkit_started_compact"))
 					btnStartBuildkitd.Enable()
 					btnStopBuildkitd.Enable()
 				})
@@ -787,8 +787,8 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 	btnStopBuildkitd = widget.NewButton(i18n.T("status.stop_buildkitd"), func() {
 		btnStartBuildkitd.Disable()
 		btnStopBuildkitd.Disable()
-		buildkitdCard.SetStatus("⏳ Остановка Buildkitd...", "⏳ Остановка...")
-		lastCheckLabel.SetText("⏳ Остановка Buildkitd...")
+		buildkitdCard.SetStatus(i18n.T("status.buildkit_stopping"), i18n.T("status.buildkit_stopping_compact"))
+		lastCheckLabel.SetText(i18n.T("status.buildkit_stopping"))
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
@@ -802,8 +802,8 @@ func BuildStatusTab(win fyne.Window) fyne.CanvasObject {
 
 			wsl.StopBuildkitd()
 			safeUI(func() {
-				buildkitdCard.SetStatus("⚠️ Buildkitd остановлен", "⚠️ Остановлен")
-				lastCheckLabel.SetText("Buildkitd остановлен")
+				buildkitdCard.SetStatus(i18n.T("status.buildkit_stopped"), i18n.T("status.buildkit_stopped_compact"))
+				lastCheckLabel.SetText(i18n.T("status.buildkit_stopped"))
 				btnStartBuildkitd.Enable()
 				btnStopBuildkitd.Enable()
 			})

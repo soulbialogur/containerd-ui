@@ -107,12 +107,12 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		// Сохраняем язык в config.json
 		cfg, err := wsl.LoadConfig()
 		if err != nil {
-			dialog.ShowError(err, win)
+			showAppError(win, err)
 			return
 		}
 		cfg.Language = string(locale)
 		if err := wsl.SaveConfig(cfg); err != nil {
-			dialog.ShowError(err, win)
+			showAppError(win, err)
 			return
 		}
 		// Большинство виджетов создаёт переведённый текст один раз.
@@ -123,19 +123,8 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	langHint := widget.NewLabel(i18n.T("settings.lang_hint"))
 	langHint.TextStyle = fyne.TextStyle{Italic: true}
 
-	entryProjectName := makeSettingEntry(i18n.T("settings.project_name_placeholder"))
-
 	entryPath := makeScrollableSettingEntry(i18n.T("settings.project_path_placeholder"))
 	entryPath.SetText(wsl.GetActiveProjectPath())
-	entryPath.OnChanged = func(text string) {
-		projects := wsl.GetProjects()
-		for _, p := range projects {
-			if p.Path == text {
-				entryProjectName.SetText(p.Name)
-				return
-			}
-		}
-	}
 
 	projectsList := widget.NewList(
 		func() int {
@@ -166,7 +155,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	}
 
 	btnAddProject.OnTapped = func() {
-		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+		folderDialog := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
 			if err != nil || uri == nil {
 				return
 			}
@@ -184,27 +173,28 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			}
 
 			if err := wsl.AddProject(path); err != nil {
-				dialog.ShowError(err, win)
+				showAppError(win, err)
 				return
 			}
 
 			entryPath.SetText(path)
-			entryProjectName.SetText("")
 			updateProjectsList()
 
-			msg := "Проект добавлен: " + path
+			msgKey := "settings.project_added_warn"
 			if composeExists {
-				msg += "\n✅ Найдён docker-compose.yml"
-			} else {
-				msg += "\n⚠️ Не найден docker-compose.yml"
+				msgKey = "settings.project_added_ok"
 			}
-			dialog.ShowCustom("Проект добавлен", "ОК", widget.NewLabel(msg), win)
+			dialog.ShowCustom(i18n.T("settings.project_added"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T(msgKey, path)), win)
 		}, win)
+		folderDialog.SetTitleText(i18n.T("settings.select_project_folder"))
+		folderDialog.SetConfirmText(i18n.T("dialogs.select"))
+		folderDialog.SetDismissText(i18n.T("dialogs.cancel"))
+		folderDialog.Show()
 	}
 
 	btnRemoveProject.OnTapped = func() {
 		if selectedProjectPath == "" {
-			dialog.ShowInformation(i18n.T("dialogs.warning"), i18n.T("settings.no_selection_remove"), win)
+			showAppInfo(win, i18n.T("dialogs.warning"), i18n.T("settings.no_selection_remove"))
 			return
 		}
 
@@ -218,12 +208,11 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 					return
 				}
 				if err := wsl.RemoveProject(selectedProjectPath); err != nil {
-					dialog.ShowError(err, win)
+					showAppError(win, err)
 					return
 				}
 				selectedProjectPath = ""
 				entryPath.SetText(wsl.GetActiveProjectPath())
-				entryProjectName.SetText("")
 				updateProjectsList()
 				dialog.ShowCustom(i18n.T("settings.project_removed"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.project_removed_msg")), win)
 			},
@@ -234,7 +223,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 	btnRenameProject.OnTapped = func() {
 		if selectedProjectPath == "" {
-			dialog.ShowInformation(i18n.T("dialogs.warning"), i18n.T("settings.no_selection_rename"), win)
+			showAppInfo(win, i18n.T("dialogs.warning"), i18n.T("settings.no_selection_rename"))
 			return
 		}
 
@@ -247,7 +236,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				return
 			}
 			if err := wsl.RenameProject(selectedProjectPath, renameEntry.Text); err != nil {
-				dialog.ShowError(err, win)
+				showAppError(win, err)
 				return
 			}
 			updateProjectsList()
@@ -261,7 +250,6 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		if id < len(projects) {
 			selectedProjectPath = projects[id].Path
 			entryPath.SetText(projects[id].Path)
-			entryProjectName.SetText(projects[id].Name)
 		}
 	}
 	projectsList.OnUnselected = func(id widget.ListItemID) {
@@ -298,7 +286,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 	if config.DeploymentProxy == "" || (config.DeploymentProxy != "traefik" && config.DeploymentProxy != "cloudflare") {
 		proxyRadio.SetSelected("Traefik + Let's Encrypt")
 	}
-	proxyHint := widget.NewLabel("💡 Traefik — бесплатный SSL через Let's Encrypt; Cloudflare — через Tunnel, без открытых портов")
+	proxyHint := widget.NewLabel(i18n.T("deploy.proxy_hint"))
 	proxyHint.TextStyle = fyne.TextStyle{Italic: true}
 
 	entryBackendService := makeSettingEntry(i18n.T("settings.backend_service_placeholder"))
@@ -435,14 +423,14 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			default:
 			}
 			cmd := exec.Command("explorer.exe")
-			cmd.Start()
+			_ = cmd.Run()
 		}()
 	}
 
 	btnCheckPath.OnTapped = func() {
 		path := entryPath.Text
 		if path == "" {
-			dialog.ShowInformation(i18n.T("dialogs.warning"), i18n.T("settings.no_path_msg"), win)
+			showAppInfo(win, i18n.T("dialogs.warning"), i18n.T("settings.no_path_msg"))
 			return
 		}
 
@@ -450,7 +438,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 
 		dirInfo, err := os.Stat(path)
 		if err != nil || !dirInfo.IsDir() {
-			dialog.ShowCustom(i18n.T("settings.path_not_found"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.path_not_found_msg", path, err)), win)
+			dialog.ShowCustom(i18n.T("settings.path_not_found"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.path_not_found_msg", path, localizedErrorMessage(err))), win)
 			return
 		}
 
@@ -503,7 +491,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				case searchErr != nil:
 					return
 				case setPathErr != nil:
-					dialog.ShowError(setPathErr, win)
+					showAppError(win, setPathErr)
 				case path != "":
 					updateUI()
 					dialog.ShowCustom(i18n.T("settings.detected"), i18n.T("dialogs.ok"), widget.NewLabel(i18n.T("settings.detected_msg", path)), win)
@@ -527,7 +515,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			}
 
 			env := wsl.DetectEnvironment()
-			msg := fmt.Sprintf("🔧 Оболочка: %s\n📦 Пакетный менеджер: %s\n⚙️ Init-система: %s\n🔑 Повышение привилегий: %s",
+			msg := i18n.T("settings.environment_detected_details",
 				env.Shell, env.PkgManager, env.InitSystem, env.PrivilegeCmd)
 			dialog.ShowCustom(i18n.T("settings.env_detected"), i18n.T("dialogs.ok"), widget.NewLabel(msg), win)
 			btnDetectEnv.Enable()
@@ -540,9 +528,9 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		cfg, err := wsl.LoadConfig()
 		if err != nil || cfg == nil {
 			if err == nil {
-				err = fmt.Errorf("не удалось загрузить конфигурацию")
+				err = fmt.Errorf("%s", i18n.T("settings.config_load_failed"))
 			}
-			dialog.ShowError(err, win)
+			showErrorDialog(win, i18n.T("settings.config_load_failed"))
 			return
 		}
 		previousDistro := strings.TrimSpace(cfg.WslDistro)
@@ -554,7 +542,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			path := filepath.Clean(entryPath.Text)
 			if err := wsl.AddProject(path); err != nil {
 				if setErr := wsl.SetActiveProject(path); setErr != nil {
-					dialog.ShowError(setErr, win)
+					showAppError(win, setErr)
 					return
 				}
 			}
@@ -564,17 +552,17 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			if !wsl.IsWslDistroAvailable(distro) {
 				detected := wsl.DetectWslDistro()
 				if detected == "" {
-					dialog.ShowError(fmt.Errorf("WSL-дистрибутив %q не найден. Проверьте установленные дистрибутивы командой: wsl.exe -l -q", distro), win)
+					showErrorDialog(win, i18n.T("settings.wsl_distro_not_found", distro))
 					return
 				}
 				entryDistro.SetText(detected)
 				distro = detected
 			}
-			if !strings.EqualFold(distro, wsl.GetDefaultWslDistroName()) {
-				dialog.ShowError(fmt.Errorf("поддерживается только WSL-дистрибутив %s", wsl.GetDefaultWslDistroName()), win)
+			if !wsl.IsSupportedWslDistro(distro) {
+				showErrorDialog(win, i18n.T("settings.wsl_distro_unsupported", strings.Join(wsl.GetSupportedWslDistroNames(), ", ")))
 				return
 			}
-			cfg.WslDistro = wsl.GetDefaultWslDistroName()
+			cfg.WslDistro = distro
 		} else {
 			cfg.WslDistro = wsl.DetectWslDistro()
 		}
@@ -620,12 +608,12 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 			}
 		}
 		if maxSizeStr := entryMaxWSLCacheSize.Text; maxSizeStr != "" {
-			if maxSize, err := strconv.ParseInt(maxSizeStr, 10, 64); err == nil && maxSize > 0 {
+			if maxSize, err := strconv.ParseInt(maxSizeStr, 10, 64); err == nil && maxSize >= 0 {
 				cfg.MaxWSLCacheSize = maxSize
 			}
 		}
 		if cleanupAtStr := entryWSLCacheCleanupAt.Text; cleanupAtStr != "" {
-			if cleanupAt, err := strconv.Atoi(cleanupAtStr); err == nil && cleanupAt > 0 {
+			if cleanupAt, err := strconv.Atoi(cleanupAtStr); err == nil && cleanupAt >= 0 {
 				cfg.WSLCacheCleanupAt = cleanupAt
 			}
 		}
@@ -661,7 +649,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		cfg.Compression = compressionRadio.Selected
 		compressionLevelValue, err := strconv.Atoi(compressionLevel.Text)
 		if err != nil || compressionLevelValue < 1 || compressionLevelValue > 9 {
-			dialog.ShowError(fmt.Errorf("уровень сжатия должен быть целым числом от 1 до 9"), win)
+			showErrorDialog(win, i18n.T("settings.compression_level_invalid"))
 			return
 		}
 		cfg.CompressionLevel = compressionLevelValue
@@ -680,7 +668,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 		}
 
 		if err := wsl.SaveConfig(cfg); err != nil {
-			dialog.ShowError(err, win)
+			showAppError(win, err)
 			return
 		}
 
@@ -704,7 +692,7 @@ func BuildSettingsTab(win fyne.Window) fyne.CanvasObject {
 				}
 				cfg := wsl.DefaultConfig()
 				if err := wsl.SaveConfig(cfg); err != nil {
-					dialog.ShowError(err, win)
+					showAppError(win, err)
 					return
 				}
 				wsl.InitConfigCache(cfg)

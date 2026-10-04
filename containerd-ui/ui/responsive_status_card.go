@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"containerd-ui/i18n"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
@@ -147,7 +149,7 @@ type responsiveStatusCard struct {
 }
 
 func newResponsiveStatusCard(title string) *responsiveStatusCard {
-	label := widget.NewLabel("Загрузка...")
+	label := widget.NewLabel(i18n.T("common.loading"))
 	card := widget.NewCard(title, "", label)
 	result := &responsiveStatusCard{card: card, label: label}
 	result.container = container.New(&responsiveStatusCardLayout{card: result}, card)
@@ -166,8 +168,10 @@ func (card *responsiveStatusCard) SetStatus(fullText, compactText string) {
 
 func (card *responsiveStatusCard) SetLoading(loading bool) {
 	if loading {
-		card.label.SetText("...")
-		card.label.Refresh()
+		if card.fullText == "" && card.compactText == "" {
+			card.label.SetText("...")
+			card.label.Refresh()
+		}
 		return
 	}
 	card.updateText()

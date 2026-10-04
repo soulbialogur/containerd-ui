@@ -51,9 +51,20 @@ func (l *responsiveTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 	return fyne.NewSize(width, objects[0].MinSize().Height)
 }
 
-func (l *responsiveTableLayout) columnWidths(_ float32) []float32 {
+func (l *responsiveTableLayout) columnWidths(availableWidth float32) []float32 {
 	widths := make([]float32, len(l.preferredWidths))
 	copy(widths, l.preferredWidths)
+	preferredTotal := float32(0)
+	for _, width := range l.preferredWidths {
+		preferredTotal += width
+	}
+	if availableWidth <= preferredTotal || preferredTotal <= 0 {
+		return widths
+	}
+	extra := availableWidth - preferredTotal
+	for index, width := range widths {
+		widths[index] = width + extra*(width/preferredTotal)
+	}
 	return widths
 }
 

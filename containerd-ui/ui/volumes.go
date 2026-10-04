@@ -3,6 +3,7 @@ package ui
 import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"context"
 	"strings"
 	"time"
 
@@ -14,16 +15,17 @@ import (
 
 func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 	var volumes []wsl.Volume
+	var volumeLoadGeneration uint64
 	selectedName := ""
 
 	newVolumeRow := func() fyne.CanvasObject {
-		labels := make([]fyne.CanvasObject, 3)
+		labels := make([]fyne.CanvasObject, 4)
 		for i := range labels {
 			label := widget.NewLabel("")
 			label.Wrapping = fyne.TextTruncate
 			labels[i] = label
 		}
-		return container.NewGridWithColumns(3, labels...)
+		return container.NewGridWithColumns(4, labels...)
 	}
 
 	volumeList := widget.NewList(
@@ -43,18 +45,50 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 			if len(mount) > 45 {
 				mount = "..." + mount[len(mount)-42:]
 			}
-			values := []string{name, v.Driver, mount}
+			values := []string{name, v.Driver, mount, v.Size}
 			for i, value := range values {
 				labels[i].(*widget.Label).SetText(value)
 			}
 		},
 	)
 
-	header := container.NewGridWithColumns(3,
+	header := container.NewGridWithColumns(4,
 		widget.NewLabelWithStyle(i18n.T("volumes.header_name"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewLabelWithStyle(i18n.T("volumes.header_type"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewLabelWithStyle(i18n.T("volumes.header_mount"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle(i18n.T("volumes.header_size"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
+	loadVolumes := func(data []wsl.Volume) {
+		volumeLoadGeneration++
+		generation := volumeLoadGeneration
+		volumes = append([]wsl.Volume(nil), data...)
+		for index := range volumes {
+			volumes[index].Size = "..."
+		}
+		volumeList.Refresh()
+		snapshot := append([]wsl.Volume(nil), volumes...)
+		go func() {
+			ctx, cancel := context.WithCancel(wsl.AppContext())
+			defer cancel()
+			sizes := wsl.GetVolumeSizes(ctx, snapshot)
+			if ctx.Err() != nil {
+				return
+			}
+			safeUI(func() {
+				if generation != volumeLoadGeneration {
+					return
+				}
+				for index := range volumes {
+					if size, ok := sizes[volumes[index].Name]; ok {
+						volumes[index].Size = size
+					} else {
+						volumes[index].Size = "—"
+					}
+				}
+				volumeList.Refresh()
+			})
+		}()
+	}
 
 	var btnRefresh *widget.Button
 	var refreshTimer *time.Timer
@@ -82,8 +116,7 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 			data, err := wsl.ListVolumes()
 			if err == nil {
 				safeUI(func() {
-					volumes = data
-					volumeList.Refresh()
+					loadVolumes(data)
 				})
 			}
 		})
@@ -116,6 +149,7 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 							break
 						}
 					}
+					volumeLoadGeneration++
 					volumeList.Refresh()
 
 					go func(name string) {
@@ -129,15 +163,16 @@ func BuildVolumesTab(win fyne.Window) fyne.CanvasObject {
 						data, listErr := wsl.ListVolumes()
 						safeUI(func() {
 							if listErr == nil {
-								volumes = data
+								loadVolumes(data)
 							} else if removeErr != nil {
-								volumes = previousVolumes
+								loadVolumes(previousVolumes)
+							} else {
+								volumeList.Refresh()
 							}
-							volumeList.Refresh()
 							if removeErr != nil {
-								dialog.ShowError(removeErr, win)
+								showAppError(win, removeErr)
 							} else if listErr != nil {
-								dialog.ShowError(listErr, win)
+								showAppError(win, listErr)
 							}
 						})
 					}(volumeName)

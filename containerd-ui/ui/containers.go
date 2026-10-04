@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,11 +22,30 @@ func safeUI(f func()) {
 	fyne.Do(f)
 }
 
-type tableData struct {
-	mu   sync.RWMutex
-	rows []wsl.Container
-	idx  map[string]int
+func withSelectionOrAll(selectedID string, onSelected, onAll func()) {
+	if selectedID != "" {
+		onSelected()
+		return
+	}
+	onAll()
 }
+
+type tableData struct {
+	mu            sync.RWMutex
+	rows          []wsl.Container
+	idx           map[string]int
+	sortField     containerSortField
+	sortAscending bool
+	sortActive    bool
+}
+
+type containerSortField uint8
+
+const (
+	sortByID containerSortField = iota
+	sortByName
+	sortByStatus
+)
 
 func runContainerOperations(containers []wsl.Container, cancelCh <-chan struct{}, operation func(string) error) error {
 	if len(containers) == 0 {
@@ -86,6 +106,17 @@ func runContainerOperations(containers []wsl.Container, cancelCh <-chan struct{}
 	return firstErr
 }
 
+func runningContainers(containers []wsl.Container) []wsl.Container {
+	var running []wsl.Container
+	for _, container := range containers {
+		status := strings.ToLower(container.Status)
+		if strings.Contains(status, "running") || strings.Contains(status, "up") {
+			running = append(running, container)
+		}
+	}
+	return running
+}
+
 func newDataTable() *tableData {
 	return &tableData{
 		rows: make([]wsl.Container, 0, 32),
@@ -103,18 +134,69 @@ func (td *tableData) getRows() []wsl.Container {
 
 func (td *tableData) setRows(rows []wsl.Container) {
 	td.mu.Lock()
-	td.rows = rows
+	td.rows = append([]wsl.Container(nil), rows...)
+	if td.sortActive {
+		td.sortRowsLocked()
+	}
+	td.rebuildIndexLocked()
+	td.mu.Unlock()
+}
+
+func (td *tableData) rebuildIndexLocked() {
 	if td.idx == nil {
-		td.idx = make(map[string]int, len(rows))
+		td.idx = make(map[string]int, len(td.rows))
 	} else {
 		for k := range td.idx {
 			delete(td.idx, k)
 		}
 	}
-	for i, c := range rows {
+	for i, c := range td.rows {
 		td.idx[c.ID] = i
 	}
+}
+
+func (td *tableData) toggleSort(field containerSortField) bool {
+	td.mu.Lock()
+	if td.sortActive && td.sortField == field {
+		td.sortAscending = !td.sortAscending
+	} else {
+		td.sortField = field
+		td.sortAscending = true
+		td.sortActive = true
+	}
+	td.sortRowsLocked()
+	td.rebuildIndexLocked()
+	ascending := td.sortAscending
 	td.mu.Unlock()
+	return ascending
+}
+
+func (td *tableData) sortRowsLocked() {
+	valueFor := func(row wsl.Container) string {
+		switch td.sortField {
+		case sortByID:
+			return row.ID
+		case sortByName:
+			if row.Name == "" {
+				return "—"
+			}
+			return row.Name
+		case sortByStatus:
+			return row.Status
+		default:
+			return ""
+		}
+	}
+	sort.SliceStable(td.rows, func(left, right int) bool {
+		comparison := strings.Compare(
+			strings.ToLower(valueFor(td.rows[left])),
+			strings.ToLower(valueFor(td.rows[right])),
+		)
+		if td.sortAscending {
+			return comparison < 0
+		}
+		return comparison > 0
+	})
 }
 
 func (td *tableData) getIndex(id string) (int, bool) {
@@ -170,7 +252,11 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 	newContainerRow := func() fyne.CanvasObject {
 		labels := make([]fyne.CanvasObject, 5)
-		for i := range labels {
+		idButton := widget.NewButton("", nil)
+		idButton.Alignment = widget.ButtonAlignLeading
+		idButton.Importance = widget.LowImportance
+		labels[0] = idButton
+		for i := 1; i < len(labels); i++ {
 			label := widget.NewLabel("")
 			label.Wrapping = fyne.TextTruncate
 			labels[i] = label
@@ -194,6 +280,15 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 			}
 			values := []string{row.ID, row.Name, imageName, wsl.TranslateStatus(row.Status), row.Ports}
 			for i, value := range values {
+				if i == 0 {
+					id := row.ID
+					button := labels[i].(*widget.Button)
+					button.SetText(value)
+					button.OnTapped = func() {
+						fyne.CurrentApp().Clipboard().SetContent(id)
+					}
+					continue
+				}
 				label := labels[i].(*widget.Label)
 				if i == 1 && value == "" {
 					value = "—"
@@ -206,12 +301,52 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 			}
 		},
 	)
+	updateRows := func(rows []wsl.Container) {
+		selectedContainerID := selectedID
+		data.setRows(rows)
+		containerList.Refresh()
+		containerList.UnselectAll()
+		if index, ok := data.getIndex(selectedContainerID); ok {
+			containerList.Select(widget.ListItemID(index))
+		}
+	}
+
+	var sortHeaders []struct {
+		button *widget.Button
+		title  string
+	}
+	makeSortHeader := func(title string, field containerSortField) fyne.CanvasObject {
+		button := widget.NewButton(title, nil)
+		button.Alignment = widget.ButtonAlignLeading
+		button.Importance = widget.LowImportance
+		sortHeaders = append(sortHeaders, struct {
+			button *widget.Button
+			title  string
+		}{button: button, title: title})
+		button.OnTapped = func() {
+			ascending := data.toggleSort(field)
+			for _, header := range sortHeaders {
+				header.button.SetText(header.title)
+			}
+			direction := " ↓"
+			if ascending {
+				direction = " ↑"
+			}
+			button.SetText(title + direction)
+			containerList.Refresh()
+			containerList.UnselectAll()
+			if index, ok := data.getIndex(selectedID); ok {
+				containerList.Select(widget.ListItemID(index))
+			}
+		}
+		return button
+	}
 
 	header := container.NewGridWithColumns(5,
-		widget.NewLabelWithStyle(i18n.T("containers.id"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle(i18n.T("containers.name"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		makeSortHeader(i18n.T("containers.id"), sortByID),
+		makeSortHeader(i18n.T("containers.name"), sortByName),
 		widget.NewLabelWithStyle(i18n.T("containers.image"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle(i18n.T("containers.status"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		makeSortHeader(i18n.T("containers.status"), sortByStatus),
 		widget.NewLabelWithStyle(i18n.T("containers.ports"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 
@@ -240,9 +375,8 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 					}
 					return
 				}
-				data.setRows(containers)
 				safeUI(func() {
-					containerList.Refresh()
+					updateRows(containers)
 				})
 			}()
 		})
@@ -339,9 +473,8 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 			containers, listErr := wsl.ListContainers(true)
 			if listErr == nil {
-				data.setRows(containers)
 				safeUI(func() {
-					containerList.Refresh()
+					updateRows(containers)
 				})
 			}
 		}()
@@ -350,7 +483,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 	makeBtn := func(text string, tapped func()) fyne.CanvasObject {
 		return widget.NewButton(text, tapped)
 	}
-	showRemoveConfirm := func(title, message string, onConfirm func()) {
+	showConfirm := func(title, message string, onConfirm func()) {
 		confirmDialog := dialog.NewCustomConfirm(
 			title,
 			i18n.T("dialogs.ok"),
@@ -374,12 +507,12 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 		nil, nil, nil,
 		container.NewAdaptiveGrid(4,
 			makeBtn(i18n.T("containers.start"), func() {
-				if selectedID != "" {
+				withSelectionOrAll(selectedID, func() {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 						progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_start"))
 						return wsl.StartContainer(selectedID)
 					}, OpStart)
-				} else {
+				}, func() {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 						containers, err := wsl.ListContainers(true)
 						if err != nil {
@@ -394,63 +527,74 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 						}
 						return runContainerOperations(stopped, cancelCh, wsl.StartContainer)
 					}, OpStart)
-				}
+				})
 			}),
 			makeBtn(i18n.T("containers.stop"), func() {
-				if selectedID != "" {
+				withSelectionOrAll(selectedID, func() {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 						progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_stop"))
 						return wsl.StopContainer(selectedID)
 					}, OpStop)
-				} else {
+				}, func() {
 					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 						containers, err := wsl.ListContainers(true)
 						if err != nil {
 							return err
 						}
-						var running []wsl.Container
-						for _, c := range containers {
-							if strings.Contains(strings.ToLower(c.Status), "running") || strings.Contains(strings.ToLower(c.Status), "up") {
-								running = append(running, c)
-							}
-						}
+						running := runningContainers(containers)
 						if len(running) == 0 {
 							return nil
 						}
 						return runContainerOperations(running, cancelCh, wsl.StopContainer)
 					}, OpStop)
-				}
+				})
 			}),
 			makeBtn(i18n.T("containers.restart"), func() {
-				if selectedID == "" {
-					showErrorDialog(win, "Сначала выберите контейнер для перезапуска")
-					return
-				}
-				asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
-					progress.UpdateOperation(selectedID, 0.1, i18n.T("containers.progress_stop"))
-					time.Sleep(SleepOperation)
-					err := wsl.StopContainer(selectedID)
-					if err != nil {
-						return fmt.Errorf("остановка контейнера %s: %w", selectedID, err)
+				restartContainer := func(id string, progress *OperationManager) error {
+					if progress != nil {
+						progress.UpdateOperation(id, 0.1, i18n.T("containers.progress_stop"))
 					}
-					progress.UpdateOperation(selectedID, 0.5, i18n.T("containers.progress_start"))
 					time.Sleep(SleepOperation)
-					if err := wsl.StartContainer(selectedID); err != nil {
-						return fmt.Errorf("запуск контейнера %s: %w", selectedID, err)
+					if err := wsl.StopContainer(id); err != nil {
+						return fmt.Errorf("%s: %w", i18n.T("containers.err_stop_container", id), err)
+					}
+					if progress != nil {
+						progress.UpdateOperation(id, 0.5, i18n.T("containers.progress_start"))
+					}
+					time.Sleep(SleepOperation)
+					if err := wsl.StartContainer(id); err != nil {
+						return fmt.Errorf("%s: %w", i18n.T("containers.err_start_container", id), err)
 					}
 					return nil
-				}, OpRestart)
+				}
+				withSelectionOrAll(selectedID, func() {
+					asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
+						return restartContainer(selectedID, progress)
+					}, OpRestart)
+				}, func() {
+					showConfirm(i18n.T("containers.restart"), i18n.T("containers.confirm_restart_all"), func() {
+						asyncAction(func(_ *OperationManager, cancelCh chan struct{}) error {
+							containers, err := wsl.ListContainers(true)
+							if err != nil {
+									return err
+								}
+								return runContainerOperations(runningContainers(containers), cancelCh, func(id string) error {
+									return restartContainer(id, nil)
+								})
+							}, OpRestart)
+						})
+					})
 			}),
 			makeBtn(i18n.T("containers.remove"), func() {
-				if selectedID != "" {
-					showRemoveConfirm(i18n.T("containers.remove_title"), i18n.T("containers.confirm_remove", selectedID), func() {
+				withSelectionOrAll(selectedID, func() {
+					showConfirm(i18n.T("containers.remove_title"), i18n.T("containers.confirm_remove", selectedID), func() {
 						asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 							progress.UpdateOperation(selectedID, 0.4, i18n.T("containers.progress_remove"))
 							return wsl.RemoveContainer(selectedID)
 						}, OpRemove)
 					})
-				} else {
-					showRemoveConfirm(i18n.T("containers.remove_all_title"), i18n.T("containers.confirm_remove_all"), func() {
+				}, func() {
+					showConfirm(i18n.T("containers.remove_all_title"), i18n.T("containers.confirm_remove_all"), func() {
 						asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 							containers, err := wsl.ListContainers(true)
 							if err != nil {
@@ -462,7 +606,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 							return runContainerOperations(containers, cancelCh, wsl.RemoveContainer)
 						}, OpRemove)
 					})
-				}
+				})
 			}),
 			makeBtn(i18n.T("containers.build"), func() {
 				radio := widget.NewRadioGroup([]string{i18n.T("containers.build_full"), i18n.T("containers.build_only_run")}, nil)
@@ -575,17 +719,20 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 							if err != nil {
 								errorText := err.Error()
-								if cleanedOutput := strings.TrimSpace(wsl.CleanWSLUserOutput(out)); cleanedOutput != "" &&
+								var buildErr *wsl.BuildError
+								if !errors.As(err, &buildErr) {
+									if cleanedOutput := strings.TrimSpace(wsl.CleanWSLUserOutput(out)); cleanedOutput != "" &&
 									!strings.Contains(errorText, cleanedOutput) {
-									outputLines := strings.Split(cleanedOutput, "\n")
-									if len(outputLines) > 30 {
-										outputLines = outputLines[len(outputLines)-30:]
+										outputLines := strings.Split(cleanedOutput, "\n")
+										if len(outputLines) > 30 {
+											outputLines = outputLines[len(outputLines)-30:]
+										}
+										errorText += "\n\n" + i18n.T("containers.build_output_tail") + "\n" + strings.Join(outputLines, "\n")
 									}
-									errorText += "\n\nВывод сборки (последние строки):\n" + strings.Join(outputLines, "\n")
 								}
 								opManager.FinishOperation(opID, false, errorText)
 								safeUI(func() {
-									showErrorDialog(win, errorText)
+									showBuildErrorDialog(win, errorText)
 								})
 							} else {
 								currentOp := opManager.GetOperation(opID)
@@ -598,9 +745,8 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 							}
 
 							containers, _ := wsl.ListContainers(true)
-							data.setRows(containers)
 							safeUI(func() {
-								containerList.Refresh()
+								updateRows(containers)
 							})
 						}()
 					},
@@ -628,17 +774,19 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 
 				if currentImage == "" {
 					safeUI(func() {
-						dialog.ShowError(errors.New(i18n.T("containers.image_detect_error")), win)
+						showErrorDialog(win, i18n.T("containers.image_detect_error"))
 					})
 					return
 				}
 
 				safeUI(func() {
-					dialog.ShowEntryDialog(i18n.T("containers.enter_image"), i18n.T("containers.image_placeholder"), func(value string) {
-						if value == "" {
+					imageEntry := widget.NewEntry()
+					imageEntry.SetPlaceHolder(i18n.T("containers.image_placeholder"))
+					dialog.NewCustomConfirm(i18n.T("containers.enter_image"), i18n.T("dialogs.ok"), i18n.T("dialogs.cancel"), imageEntry, func(confirmed bool) {
+						if !confirmed || strings.TrimSpace(imageEntry.Text) == "" {
 							return
 						}
-						newImage := strings.TrimSpace(value)
+						newImage := strings.TrimSpace(imageEntry.Text)
 
 						asyncAction(func(progress *OperationManager, cancelCh chan struct{}) error {
 							progress.UpdateOperation(selectedID, 0.10, i18n.T("containers.progress_stop"))
@@ -712,7 +860,7 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 							progress.UpdateOperation(selectedID, 0.95, i18n.T("containers.progress_update_done"))
 							return nil
 						}, OpStart)
-					}, win)
+					}, win).Show()
 				})
 			}),
 			btnRefresh,
@@ -725,6 +873,14 @@ func BuildContainersTab(win fyne.Window) fyne.CanvasObject {
 }
 
 func showErrorDialog(win fyne.Window, errMsg string) {
+	showErrorDialogWithTitle(win, i18n.T("dialogs.error"), errMsg)
+}
+
+func showBuildErrorDialog(win fyne.Window, errMsg string) {
+	showErrorDialogWithTitle(win, i18n.T("containers.build_error_title"), errMsg)
+}
+
+func showErrorDialogWithTitle(win fyne.Window, title, errMsg string) {
 	entry := widget.NewMultiLineEntry()
 	entry.SetText(errMsg)
 	entry.Disable()
@@ -733,14 +889,7 @@ func showErrorDialog(win fyne.Window, errMsg string) {
 	scroll := container.NewScroll(entry)
 	scroll.SetMinSize(fyne.NewSize(600, 400))
 
-	dlg := dialog.NewCustomConfirm(
-		i18n.T("containers.build_error_title"),
-		i18n.T("dialogs.ok"),
-		"",
-		scroll,
-		func(closed bool) {},
-		win,
-	)
+	dlg := dialog.NewCustom(title, i18n.T("dialogs.ok"), scroll, win)
 	dlg.Resize(fyne.NewSize(650, 450))
 	dlg.Show()
 }

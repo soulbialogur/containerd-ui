@@ -65,8 +65,7 @@ func BuildDatabaseTab() fyne.CanvasObject {
 					filesList.Refresh()
 					return
 				}
-				lblSize.SetText(i18n.T("common.error") + ": " + err.Error())
-								lblSize.SetText(i18n.T("database.read_error", volName, localizedWslError(err)))
+				lblSize.SetText(i18n.T("database.read_error", volName, localizedWslError(err)))
 				emptyState.Hidden = true
 				files = nil
 				filesList.Refresh()

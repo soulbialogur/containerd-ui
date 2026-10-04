@@ -3,6 +3,7 @@ package ui
 import (
 	"containerd-ui/i18n"
 	"containerd-ui/wsl"
+	"context"
 	"strings"
 	"time"
 
@@ -15,8 +16,9 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 	var containers []wsl.Container
 	selectedID := ""
 	liveRequested := false
-	var liveTicker *time.Ticker
-	var liveStop chan struct{}
+	lastLogTimestamp := ""
+	var lastLogTime time.Time
+	var liveCancel context.CancelFunc
 
 	placeholder := i18n.T("logs.select_container")
 	logText := widget.NewMultiLineEntry()
@@ -40,9 +42,32 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 		logText.Show()
 		logText.Refresh()
 	}
+	appendLiveLog := func(line string) {
+		if strings.TrimSpace(line) == "" {
+			return
+		}
+		current := strings.TrimSpace(logText.Text)
+		if current != "" {
+			current += "\n"
+		}
+		lines := strings.Split(current+line, "\n")
+		limit := wsl.GetLogTail()
+		if limit > 0 && len(lines) > limit {
+			lines = lines[len(lines)-limit:]
+		}
+		showLogText(strings.Join(lines, "\n"))
+	}
+
+	var stopLiveLogs func()
+	var startLiveLogs func()
 
 	loadLogs := func(id string) {
 		if id == "" {
+			if stopLiveLogs != nil {
+				stopLiveLogs()
+			}
+			lastLogTimestamp = ""
+			lastLogTime = time.Time{}
 			safeUI(func() {
 				showEmptyLogs()
 				logText.SetText("")
@@ -51,21 +76,34 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			})
 			return
 		}
+		if stopLiveLogs != nil {
+			stopLiveLogs()
+		}
+		lastLogTimestamp = ""
+		lastLogTime = time.Time{}
 		go func() {
 			select {
 			case <-wsl.AppContext().Done():
 				return
 			default:
 			}
-			logs, err := wsl.GetContainerLogs(id, wsl.GetLogTail())
+			logs, timestamp, err := wsl.GetContainerLogsWithTimestamp(id, wsl.GetLogTail())
 			safeUI(func() {
+				if selectedID != id {
+					return
+				}
 				if err == nil {
+					lastLogTimestamp = timestamp
+					lastLogTime, _ = time.Parse(time.RFC3339Nano, timestamp)
 					if strings.TrimSpace(logs) == "" {
 						emptyLogs.SetText(i18n.T("logs.no_logs"))
 						showEmptyLogs()
-						return
+					} else {
+						showLogText(logs)
 					}
-					showLogText(logs)
+					if liveRequested && startLiveLogs != nil {
+						startLiveLogs()
+					}
 				} else {
 					showLogText(i18n.T("op.error", err.Error()))
 				}
@@ -73,42 +111,101 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 		}()
 	}
 
-	stopLiveLogs := func() {
-		if liveTicker != nil {
-			liveTicker.Stop()
-			liveTicker = nil
-		}
-		if liveStop != nil {
-			close(liveStop)
-			liveStop = nil
+	stopLiveLogs = func() {
+		if liveCancel != nil {
+			liveCancel()
+			liveCancel = nil
 		}
 	}
 
-	startLiveLogs := func() {
+	startLiveLogs = func() {
 		stopLiveLogs()
 		if selectedID == "" || economyMode.Load() {
 			return
 		}
-		liveTicker = time.NewTicker(time.Second)
-		liveStop = make(chan struct{})
-		go func(id string, ticker *time.Ticker, stop <-chan struct{}) {
-			for {
-				select {
-				case <-ticker.C:
-					loadLogs(id)
-				case <-stop:
-					return
-				case <-wsl.AppContext().Done():
+		id := selectedID
+		since := lastLogTimestamp
+		if since == "" {
+			since = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		ctx, cancel := context.WithCancel(wsl.AppContext())
+		liveCancel = cancel
+		go func() {
+			err := wsl.StreamContainerLogs(ctx, id, since, func(timestamp, message string) {
+				if ctx.Err() != nil {
 					return
 				}
+				safeUI(func() {
+					if ctx.Err() != nil || selectedID != id {
+						return
+					}
+					if timestamp != "" {
+						parsed, parseErr := time.Parse(time.RFC3339Nano, timestamp)
+						if parseErr == nil && !lastLogTime.IsZero() && !parsed.After(lastLogTime) {
+							return
+						}
+						if parseErr == nil {
+							lastLogTime = parsed
+							lastLogTimestamp = timestamp
+						}
+					}
+					appendLiveLog(message)
+				})
+			})
+			if err != nil && ctx.Err() == nil {
+				safeUI(func() {
+					if selectedID == id {
+						appendLiveLog(i18n.T("op.error", err.Error()))
+					}
+				})
 			}
-		}(selectedID, liveTicker, liveStop)
+		}()
+	}
+
+	refreshNewLogs := func(id string) {
+		if id == "" {
+			return
+		}
+		if lastLogTimestamp == "" {
+			loadLogs(id)
+			return
+		}
+		if liveRequested && liveCancel != nil {
+			return
+		}
+	ctx, cancel := context.WithTimeout(wsl.AppContext(), wsl.TimeoutMedium)
+		go func(since string) {
+			defer cancel()
+			entries, err := wsl.GetContainerLogEntriesSince(ctx, id, since)
+			safeUI(func() {
+				if selectedID != id {
+					return
+				}
+				if err != nil {
+					appendLiveLog(i18n.T("op.error", err.Error()))
+					return
+				}
+				for _, entry := range entries {
+					if entry.Timestamp != "" {
+						parsed, parseErr := time.Parse(time.RFC3339Nano, entry.Timestamp)
+						if parseErr != nil || (!lastLogTime.IsZero() && !parsed.After(lastLogTime)) {
+							continue
+						}
+						lastLogTime = parsed
+						lastLogTimestamp = entry.Timestamp
+					}
+					appendLiveLog(entry.Message)
+				}
+			})
+		}(lastLogTimestamp)
 	}
 
 	selector := widget.NewSelect([]string{placeholder}, func(name string) {
 		if name == placeholder || name == "" {
 			selectedID = ""
 			stopLiveLogs()
+			lastLogTimestamp = ""
+			lastLogTime = time.Time{}
 			showEmptyLogs()
 			logText.SetText("")
 			return
@@ -121,9 +218,6 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			if displayName == name {
 				selectedID = c.ID
 				loadLogs(selectedID)
-				if liveRequested {
-					startLiveLogs()
-				}
 				return
 			}
 		}
@@ -144,6 +238,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 					return
 				}
 				selectedName := ""
+				previousSelectedID := selectedID
 				for _, c := range containers {
 					if c.ID == selectedID {
 						selectedName = c.Name
@@ -165,6 +260,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 				}
 				selectedID = newSelectedID
 				if len(names) == 0 {
+					stopLiveLogs()
 					selector.Options = []string{placeholder}
 					selector.SetSelected(placeholder)
 					showEmptyLogs()
@@ -178,8 +274,15 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 					selector.SetSelected(placeholder)
 				}
 				if newSelectedID != "" {
-					loadLogs(newSelectedID)
+					if newSelectedID == previousSelectedID {
+						refreshNewLogs(newSelectedID)
+					} else {
+						loadLogs(newSelectedID)
+					}
 				} else {
+					stopLiveLogs()
+					lastLogTimestamp = ""
+					lastLogTime = time.Time{}
 					showEmptyLogs()
 					emptyLogs.SetText(i18n.T("logs.no_logs"))
 				}
@@ -199,7 +302,7 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			stopLiveLogs()
 		}
 	})
-	RegisterEconomyModeListener(func(enabled bool) {
+	unsubscribeEconomyMode := RegisterEconomyModeListener(func(enabled bool) {
 		safeUI(func() {
 			if enabled {
 				stopLiveLogs()
@@ -208,6 +311,10 @@ func BuildLogsTab(win fyne.Window) fyne.CanvasObject {
 			}
 		})
 	})
+	go func() {
+		<-wsl.AppContext().Done()
+		unsubscribeEconomyMode()
+	}()
 
 	btnClearLogs := widget.NewButton(i18n.T("logs.clear"), func() {
 		if selectedID == "" {

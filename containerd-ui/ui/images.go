@@ -122,9 +122,9 @@ func BuildImagesTab(win fyne.Window) fyne.CanvasObject {
 								}
 								imageList.Refresh()
 								if removeErr != nil {
-									dialog.ShowError(removeErr, win)
+									showAppError(win, removeErr)
 								} else if listErr != nil {
-									dialog.ShowError(listErr, win)
+									showAppError(win, listErr)
 								}
 							})
 						}()

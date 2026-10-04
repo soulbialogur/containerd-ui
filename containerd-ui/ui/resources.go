@@ -95,37 +95,16 @@ func BuildResourcesTab() fyne.CanvasObject {
 			defer safeUI(func() { setRefreshButtonLoading(btnRefresh, i18n.T("resources.refresh"), false) })
 			var containerStats []wsl.ContainerStat
 			var sysRes *wsl.SystemResources
-
-			var wg sync.WaitGroup
-			wg.Add(2)
-
-			go func() {
-				defer wg.Done()
-				select {
-				case <-wsl.AppContext().Done():
-					return
-				default:
-				}
-
-				if s, err := wsl.GetStats(); err == nil {
-					containerStats = s
-				}
-			}()
-
-			go func() {
-				defer wg.Done()
-				select {
-				case <-wsl.AppContext().Done():
-					return
-				default:
-				}
-
-				if r, err := wsl.GetSystemResources(); err == nil {
-					sysRes = r
-				}
-			}()
-
-			wg.Wait()
+			select {
+			case <-wsl.AppContext().Done():
+				return
+			default:
+			}
+			snapshot := wsl.GetResourceSnapshot()
+			if snapshot.StatsErr == nil {
+				containerStats = snapshot.Stats
+			}
+			sysRes = snapshot.System
 
 			if sysRes != nil {
 				safeUI(func() {

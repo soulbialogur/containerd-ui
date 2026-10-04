@@ -15,7 +15,7 @@ func setRefreshButtonLoading(button *widget.Button, label string, loading bool) 
 		return
 	}
 	if loading {
-		button.SetText(i18n.T("dialogs.loading"))
+		button.SetText(i18n.T("common.loading"))
 		button.Disable()
 		return
 	}
@@ -25,23 +25,32 @@ func setRefreshButtonLoading(button *widget.Button, label string, loading bool) 
 
 var economyMode atomic.Bool
 var economyModeListenersMu sync.Mutex
-var economyModeListeners []func(bool)
+var economyModeListeners []economyModeListener
+
+type economyModeListener struct {
+	id uint64
+	fn func(bool)
+}
+
+var nextEconomyModeListenerID uint64
 
 type tabActive struct {
-	mu     sync.Mutex
-	active bool
-	period time.Duration
-	ticker *time.Ticker
-	done   chan struct{}
-	onTick func()
+	mu                 sync.Mutex
+	active             bool
+	autoRefreshEnabled bool
+	period             time.Duration
+	ticker             *time.Ticker
+	done               chan struct{}
+	onTick             func()
 }
 
 func newTabActive(initialActive bool, period time.Duration, onTick func()) *tabActive {
 	t := &tabActive{
-		active: initialActive,
-		period: period,
-		onTick: onTick,
-		done:   make(chan struct{}),
+		active:             initialActive,
+		autoRefreshEnabled: true,
+		period:             period,
+		onTick:             onTick,
+		done:               make(chan struct{}),
 	}
 	if initialActive && !economyMode.Load() {
 		t.startTicker(period)
@@ -50,7 +59,7 @@ func newTabActive(initialActive bool, period time.Duration, onTick func()) *tabA
 }
 
 func (ta *tabActive) startTicker(period time.Duration) {
-	if ta.ticker != nil || !ta.active || economyMode.Load() {
+	if ta.ticker != nil || !ta.active || !ta.autoRefreshEnabled || economyMode.Load() {
 		return
 	}
 	if ta.done == nil {
@@ -97,22 +106,41 @@ func SetEconomyMode(enabled bool) {
 	allTabsMu.Unlock()
 
 	economyModeListenersMu.Lock()
-	listeners := append([]func(bool){}, economyModeListeners...)
+	listeners := append([]economyModeListener(nil), economyModeListeners...)
 	economyModeListenersMu.Unlock()
 	for _, listener := range listeners {
-		listener(enabled)
+		listener.fn(enabled)
 	}
 }
 
-func RegisterEconomyModeListener(listener func(bool)) {
+func RegisterEconomyModeListener(listener func(bool)) func() {
 	if listener == nil {
-		return
+		return func() {}
 	}
 	economyModeListenersMu.Lock()
-	economyModeListeners = append(economyModeListeners, listener)
+	nextEconomyModeListenerID++
+	id := nextEconomyModeListenerID
+	economyModeListeners = append(economyModeListeners, economyModeListener{id: id, fn: listener})
 	enabled := economyMode.Load()
 	economyModeListenersMu.Unlock()
 	listener(enabled)
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			economyModeListenersMu.Lock()
+			for index, registered := range economyModeListeners {
+				if registered.id != id {
+					continue
+				}
+				copy(economyModeListeners[index:], economyModeListeners[index+1:])
+				economyModeListeners[len(economyModeListeners)-1] = economyModeListener{}
+				economyModeListeners = economyModeListeners[:len(economyModeListeners)-1]
+				break
+			}
+			economyModeListenersMu.Unlock()
+		})
+	}
 }
 
 func (ta *tabActive) stopTicker() {
@@ -137,6 +165,20 @@ func (ta *tabActive) SetActive(active bool) {
 		ta.startTicker(ta.period)
 	} else {
 		ta.active = false
+		ta.stopTicker()
+	}
+}
+
+func (ta *tabActive) SetAutoRefreshEnabled(enabled bool) {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if enabled == ta.autoRefreshEnabled {
+		return
+	}
+	ta.autoRefreshEnabled = enabled
+	if enabled {
+		ta.startTicker(ta.period)
+	} else {
 		ta.stopTicker()
 	}
 }
