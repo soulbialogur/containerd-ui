@@ -4,18 +4,21 @@ import (
 	"containerd-ui/i18n"
 	"containerd-ui/ui"
 	"containerd-ui/wsl"
+	_ "embed"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
 
-var cachedIcon []byte
+//go:embed app.ico
+var embeddedIcon []byte
 
 type windowContentLayout struct{}
 
@@ -31,16 +34,16 @@ func (windowContentLayout) MinSize([]fyne.CanvasObject) fyne.Size {
 	return fyne.NewSize(640, 0)
 }
 
-func loadIcon(path string) fyne.Resource {
-	if cachedIcon != nil {
-		return fyne.NewStaticResource(filepath.Base(path), cachedIcon)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	cachedIcon = data
-	return fyne.NewStaticResource(filepath.Base(path), data)
+func panelWrap(obj fyne.CanvasObject) fyne.CanvasObject {
+	bg := canvas.NewRectangle(bgSecondary)
+	bg.CornerRadius = 10
+	bg.StrokeColor = borderColor
+	bg.StrokeWidth = 1
+
+	inner := container.New(layout.NewCustomPaddedLayout(14, 14, 16, 16), obj)
+	panel := container.NewStack(bg, inner)
+
+	return container.New(layout.NewCustomPaddedLayout(8, 8, 8, 8), panel)
 }
 
 func main() {
@@ -62,13 +65,7 @@ func main() {
 	myApp := app.New()
 	myApp.Settings().SetTheme(&darkTheme{})
 
-	var icon fyne.Resource
-	if exePath, err := os.Executable(); err == nil {
-		iconPath := filepath.Join(filepath.Dir(exePath), "app.ico")
-		if res := loadIcon(iconPath); res != nil {
-			icon = res
-		}
-	}
+	icon := fyne.NewStaticResource("app.ico", embeddedIcon)
 
 	win := myApp.NewWindow(i18n.T("app.title"))
 	win.Resize(fyne.NewSize(1100, 700))
@@ -81,7 +78,7 @@ func main() {
 	// Тяжёлые вкладки создаются после появления окна. Это не блокирует холодный
 	// старт ожиданием WSL и позволяет показывать интерфейс сразу.
 	newPlaceholder := func() fyne.CanvasObject {
-		return panelWrap(container.NewCenter(widget.NewLabel("Загрузка...")))
+		return panelWrap(container.NewCenter(widget.NewLabel(i18n.T("common.loading"))))
 	}
 	statusTabItem := container.NewTabItem(i18n.T("tabs.status"), newPlaceholder())
 	containersTabItem := container.NewTabItem(i18n.T("tabs.containers"), newPlaceholder())
@@ -167,4 +164,4 @@ func main() {
 	}()
 
 	win.ShowAndRun()
-	}
+}

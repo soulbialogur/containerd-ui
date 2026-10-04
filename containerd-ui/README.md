@@ -19,13 +19,13 @@ The supported runtime stack is:
 
 - Windows 10/11;
 - WSL2;
-- Alpine Linux in WSL2;
+- the bundled `Alpine-ContainerdUI` distribution in WSL2;
 - OpenRC inside Alpine;
 - containerd;
 - nerdctl;
 - BuildKit (`buildkitd` and `buildctl`).
 
-The application detects Alpine, the shell, OpenRC, `apk`, and available tools automatically.
+The application uses `Alpine-ContainerdUI` and detects its shell, OpenRC, `apk`, and available tools automatically.
   
 ## Documentation
   
@@ -38,22 +38,26 @@ You'll find detailed guides in the [docs](docs/README.md) folder:
 - [Troubleshooting](docs/troubleshooting.md)
 ## Quick Start
 
-### Alpine + OpenRC (Default)
+### Bundled Alpine + OpenRC
 
-1. Install WSL2 and Alpine:
+1. Install WSL2, then run the bundled offline setup executable:
    ```powershell
-   wsl --install --distribution Alpine
+   .\dist\Alpine-ContainerdUI-Setup.exe
    ```
-2. Install Alpine runtime components: containerd, nerdctl, and BuildKit (see [installation.md](docs/installation.md)).
-3. Install Go and MinGW if you build the Windows application from source.
-4. Install `cloudflared` if you need Cloudflare Tunnel.
-5. Build the app:
+2. The `Alpine-ContainerdUI` image includes OpenRC, containerd, nerdctl, BuildKit, Go, MinGW-w64, and OpenGL development files.
+3. Install `cloudflared` if you need Cloudflare Tunnel.
+4. Build the app if needed:
    ```powershell
-   cd "C:\Users\User\OneDrive\Рабочий стол\project"
-   bash containerd-ui/build.sh
+   wsl -d Alpine-ContainerdUI
    ```
-6. Launch `containerd-ui/containerd-ui.exe`.
-7. Point it to your project root and check that the environment status looks good.
+   ```bash
+   cd /mnt/c/Users/User/OneDrive/Рабочий\ стол/project
+   sh containerd-ui/build.sh
+   ```
+5. Launch `containerd-ui/dist/containerd-ui.exe`; the app automatically selects `Alpine-ContainerdUI`.
+6. Point it to your project root and check that the environment status looks good.
+
+To build an offline WSL runtime installer, run `.\build-offline-installer.ps1` from this directory. The setup executable is written to `dist\Alpine-ContainerdUI-Setup.exe`; it installs the runtime distro used by the app.
 ## Architecture
  
 The app uses a "two-layer access" approach: containerd's gRPC API handles the main management tasks, with WSL + nerdctl acting as a fallback. For the full breakdown of how this works, see [docs/concepts.md](docs/concepts.md).
@@ -85,4 +89,3 @@ Your main settings live in `config.json`, sitting right next to the executable. 
 - [Configuration](docs/configuration.md)
 - [Deploying to a Domain](docs/deployment.md)
 - [Troubleshooting](docs/troubleshooting.md)
-
