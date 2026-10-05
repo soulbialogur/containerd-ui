@@ -57,31 +57,25 @@ Checks WSL, containerd, BuildKit, and nerdctl. Cloudflared is optional and only 
 
 ## ⚙️ System Requirements
 
-- Windows 10/11 with WSL2 enabled
-- **`Alpine-ContainerdUI`** — the only supported WSL distribution. Install it from the bundled setup executable; do not install Alpine and the runtime components separately.
-- The bundled image includes OpenRC, containerd, nerdctl, BuildKit, CNI plugins, and the Go/MinGW-w64/OpenGL development toolchain used for source builds.
-- `cloudflared` is optional and required only for Cloudflare Tunnel deployments.
-- Go 1.26.5+ and MinGW-w64 are only needed when building the Windows application from source; both are included in the bundled image.
+- Windows 10/11 with WSL2 enabled. If WSL2 is not installed yet, enable it with `wsl --install`.
+- No separate Alpine Linux, OpenRC, containerd, nerdctl, or BuildKit installation is required. The `Alpine-ContainerdUI` setup executable installs the complete prepared runtime image in one step.
+- `cloudflared` is optional and only needed when using Cloudflare Tunnel.
 
 ---
 
 ## 🚀 Quick Start
 
-**Install and enable WSL2**
+**Prepare WSL2**
 
 ```powershell
 wsl --install
 ```
 
-Restart Windows if prompted, then verify WSL2 is available:
+Run this only if WSL2 is not already installed. Restart Windows if prompted.
 
-```powershell
-wsl --list --verbose
-```
+**Install the complete runtime**
 
-**Install the bundled runtime**
-
-Download and run the `Alpine-ContainerdUI` setup executable from [the v1.2.4 release](https://github.com/soulbialogur/containerd-ui/releases/tag/1.2.4). It imports the prepared WSL2 image with OpenRC, containerd, nerdctl, and BuildKit. It does not replace a separate Alpine distribution.
+Download and run the `Alpine-ContainerdUI` setup executable from [the v1.2.4 release](https://github.com/soulbialogur/containerd-ui/releases/tag/1.2.4). It installs the complete prepared WSL2 image, including Alpine Linux, OpenRC, containerd, nerdctl, and BuildKit. You do not need to install these components separately. An existing Alpine distribution is not replaced.
 
 After installation, open Containerd UI and select `Alpine-ContainerdUI` in Settings if it was not selected automatically.
 
