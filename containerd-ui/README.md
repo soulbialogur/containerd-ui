@@ -1,8 +1,6 @@
 # Containerd UI
   
 An app for managing containers, builds, and deployments through WSL2, containerd, nerdctl, and BuildKit.
-
-> **Status: Stable.** The current release is ready for regular use with the supported Windows and WSL2 runtime stack described below.
   
 ## What It Does
   
