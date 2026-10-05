@@ -8,7 +8,7 @@
 
 **Containerd UI** is a native Windows application (Go + Fyne) that provides a graphical interface for managing containers via WSL2, containerd, nerdctl and BuildKit.
 
-**Status: Stable.** The supported runtime is Alpine Linux with OpenRC inside WSL2.
+**Status: Stable.** Version 1.2.4 uses the bundled `Alpine-ContainerdUI` runtime image in WSL2.
 
 It is built on a two‑layer architecture: the primary channel is the containerd gRPC API, with a fallback to WSL + nerdctl.
 
@@ -51,48 +51,55 @@ Centralised CacheManager with event‑based invalidation and metric collection (
 `economy_mode` pauses background updates for inactive tabs; live log streams stop when disabled or when the selected container changes.
 
 - **Environment status**  
-Instant verification of WSL, containerd, BuildKit, nerdctl, and cloudflared health.
+Checks WSL, containerd, BuildKit, and nerdctl. Cloudflared is optional and only needed for Cloudflare Tunnel deployments.
 
 ---
 
 ## ⚙️ System Requirements
 
-- Windows 10/11 with WSL2 installed
-- **Alpine Linux inside WSL2** — the only supported runtime distribution
-- OpenRC inside Alpine
-- Components installed inside WSL:
-  - `containerd`
-  - `nerdctl`
-  - `buildkitd` and `buildctl` (BuildKit is started on demand by the application)
-  - CNI plugins and the gRPC proxy, configured by the application installer
-- (Optional) `cloudflared` for Cloudflare Tunnel
-- Go 1.26.5+ and MinGW-w64 only when building the Windows application from source
+- Windows 10/11 with WSL2 enabled
+- **`Alpine-ContainerdUI`** — the only supported WSL distribution. Install it from the bundled setup executable; do not install Alpine and the runtime components separately.
+- The bundled image includes OpenRC, containerd, nerdctl, BuildKit, CNI plugins, and the Go/MinGW-w64/OpenGL development toolchain used for source builds.
+- `cloudflared` is optional and required only for Cloudflare Tunnel deployments.
+- Go 1.26.5+ and MinGW-w64 are only needed when building the Windows application from source; both are included in the bundled image.
 
 ---
 
 ## 🚀 Quick Start
 
-**Install WSL2 and Alpine**
+**Install and enable WSL2**
 
 ```powershell
-wsl --install --distribution Alpine
+wsl --install
 ```
 
-**Install the container stack inside WSL**
-
-Follow [Environment Setup](../docs/installation.md) to install the Alpine packages and configure OpenRC. Start `containerd` with OpenRC; the application starts `buildkitd` when a build needs it.
-
-**Build the application**
-
-From PowerShell, in the repository root:
+Restart Windows if prompted, then verify WSL2 is available:
 
 ```powershell
-bash containerd-ui/build.sh
+wsl --list --verbose
 ```
 
-Run `containerd-ui/containerd-ui.exe` and select the project root containing `compose.yaml` or `docker-compose.yml`.
+**Install the bundled runtime**
 
-Check the Status tab and resolve any reported component issues before building or deploying.
+Download and run the `Alpine-ContainerdUI` setup executable from [the v1.2.4 release](https://github.com/soulbialogur/containerd-ui/releases/tag/1.2.4). It imports the prepared WSL2 image with OpenRC, containerd, nerdctl, and BuildKit. It does not replace a separate Alpine distribution.
+
+After installation, open Containerd UI and select `Alpine-ContainerdUI` in Settings if it was not selected automatically.
+
+**Download and launch the application**
+
+Download `containerd-ui.exe` from [the v1.2.4 release](https://github.com/soulbialogur/containerd-ui/releases/tag/1.2.4), then launch it. The application icon is embedded in the executable. The app build output, when building from source, is `containerd-ui/dist/containerd-ui.exe`.
+
+**Build the application from source (optional)**
+
+From PowerShell, run the build script inside the bundled Alpine distribution:
+
+```powershell
+wsl -d Alpine-ContainerdUI --cd "C:\path\to\repository\containerd-ui" -- sh build.sh
+```
+
+The script cross-compiles the Windows amd64 executable and writes it to `containerd-ui/dist/containerd-ui.exe`.
+
+`cloudflared` is not bundled; install it using the [official Cloudflare instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) only if you use Cloudflare Tunnel.
 
 ---
 
